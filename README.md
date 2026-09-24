@@ -2,13 +2,34 @@
 
 Personal coursework and final-project repository maintained by **Peyman Mohammad Hassan (@peymangraph)** for the Udacity **Large Language Models and Text Generation** program.
 
-This repository is a fork of the original Udacity course repository. All new completion work is being performed only in **`peymangraph/cd13318-exercises-project`**. The upstream Udacity repository is not modified. This fork is synchronized to the latest upstream `main` content while intentionally avoiding the unrelated upstream merge commit `4cb9435` in the active branch ancestry.
+This repository is a fork of the original Udacity course repository:
+
+`https://github.com/udacity/cd13318-exercises-project.git`
+
+All completion work is performed only in **`peymangraph/cd13318-exercises-project`**. The Udacity upstream repository is not modified.
+
+## Upstream Synchronization
+
+Before continuing the final project, this fork was verified against the latest Udacity `main`.
+
+- Latest Udacity upstream commit checked: `4cb94352011993c322e057dccf78d83438667b0b`
+- Latest upstream tree SHA: `943ab1634dcd759a94b7d097f1c275274e616477`
+- Local synchronized `main` commit: `c51248fb241c7b1eafd6f8419ac48adc715f4c1c`
+- Local `main` tree SHA: `943ab1634dcd759a94b7d097f1c275274e616477`
+- The upstream and local `main` trees match exactly.
+- The `final-project` branch is based on the synchronized local `main`.
+- The unrelated upstream merge author is not present in the active `main` or `final-project` ancestry.
+- New project commits are authored and committed by **@peymangraph**.
+
+This approach keeps the repository current with Udacity while maintaining a clean working history for the final project.
 
 ## Current Project Status
 
-Active work is on the **`final-project`** branch.
+Active development is on:
 
-The `main` branch is synchronized to the latest upstream `main` snapshot through a local sync commit, while all project completion work remains on `final-project` until runtime validation and final review are complete.
+`final-project`
+
+The `main` branch is the synchronized Udacity baseline. The `final-project` branch contains the completed coursework exercises and NASA Mission Intelligence implementation.
 
 ### Completed
 
@@ -23,6 +44,7 @@ The `main` branch is synchronized to the latest upstream `main` snapshot through
 - Rubric-aligned project documentation is included.
 - GitHub Actions syntax/completeness checks are included.
 - Repository ownership metadata is configured for **@peymangraph** on the working branch.
+- Latest Udacity upstream content has been synchronized before final validation.
 
 ### Remaining Before Final Merge
 
@@ -35,9 +57,9 @@ Complete these in order:
 5. **P0-05 — Review generated/cache artifacts before submission**
 6. **P0-06 — Perform the final submission audit and merge `final-project` into `main`**
 
-The detailed checklist is maintained in **`TASKS.md`**.
+The detailed completion checklist is maintained in **`TASKS.md`**.
 
-> **Issue tracking note:** GitHub Issues are currently disabled for this repository. Until they are enabled under **Settings → General → Features → Issues**, `TASKS.md` is the active completion tracker.
+> **Issue tracking note:** GitHub Issues are currently disabled for this repository. Until they are enabled under **Settings → General → Features → Issues**, `TASKS.md` is the active task tracker.
 
 ## NASA Mission Intelligence Final Project
 
@@ -79,14 +101,48 @@ chat.py / Streamlit
 
 ### Main Final-Project Files
 
-- `embedding_pipeline.py` — chunking, embeddings, metadata, ChromaDB persistence, update modes, statistics
-- `rag_client.py` — semantic retrieval, configurable top-k, mission filtering, deduplication, context construction
-- `llm_client.py` — NASA mission expert prompting, grounding, source citation instructions, bounded conversation history
-- `ragas_evaluator.py` — Response Relevancy and Faithfulness evaluation
-- `chat.py` — Streamlit chat application
-- `batch_evaluate.py` — end-to-end batch evaluation
-- `evaluation_dataset.txt` — six rubric-aligned NASA evaluation questions
-- `README.md` — detailed setup instructions and rubric mapping
+- `embedding_pipeline.py` — configurable chunking, overlap, OpenAI embeddings, metadata, ChromaDB persistence, update modes, and statistics
+- `rag_client.py` — semantic retrieval, configurable top-k, mission filtering, sorting/deduplication, and source-attributed context construction
+- `llm_client.py` — NASA mission expert prompt, retrieved-context grounding, source citation instructions, uncertainty handling, and bounded conversation history
+- `ragas_evaluator.py` — Response Relevancy and Faithfulness evaluation with validation/error handling
+- `chat.py` — Streamlit user interface integrating retrieval, generation, mission selection, sources, and evaluation
+- `batch_evaluate.py` — end-to-end batch evaluation with per-question and aggregate metrics
+- `evaluation_dataset.txt` — six mission-relevant evaluation questions spanning overview, emergency, disaster analysis, crew, technical, and timeline categories
+- `README.md` — project-specific setup instructions and rubric mapping
+
+## Udacity Rubric Coverage
+
+### Embedding & Data Pipeline
+
+- Runtime-configurable `chunk_size` and `chunk_overlap`
+- Chunks bounded by configured chunk size
+- Consistent overlap between consecutive chunks
+- OpenAI embeddings for indexed chunks
+- Per-chunk source/filepath and mission metadata
+- `skip`, `update`, and `replace` update modes
+- Configurable ChromaDB directory and collection
+- `--stats-only` collection statistics
+
+### Retrieval & LLM Integration
+
+- User-question embedding and ChromaDB similarity retrieval
+- Runtime-configurable top-k
+- Optional mission metadata filtering
+- Score sorting and deduplication
+- Clear context separators and source attribution
+- NASA mission expert system prompt
+- Bounded role/content conversation history
+- Retrieved-context grounding and uncertainty handling
+
+### Real-Time Evaluation
+
+- Response Relevancy
+- Faithfulness
+- Structured evaluator output
+- Clear handling of empty or malformed inputs
+- Batch evaluation
+- Per-question and aggregate metrics
+- At least five mission-relevant evaluation questions across multiple categories
 
 ## Course Exercises
 
@@ -121,25 +177,37 @@ Open the NASA final project:
 cd Project-NASA-Mission-Intelligence-Starter
 ```
 
-Install dependencies:
+Create and activate a virtual environment, then install dependencies:
 
 ```bash
 python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Set an OpenAI API key and follow the project-specific README for indexing, Streamlit launch, and batch evaluation.
+Set an OpenAI API key and follow the project-specific README for ChromaDB indexing, Streamlit launch, and batch evaluation.
+
+## RAGAS Compatibility
+
+The latest Udacity upstream includes the RAGAS 0.4.3 compatibility dependencies:
+
+```text
+langchain-google-vertexai==3.2.3
+langchain-community==0.4.2
+ragas==0.4.3
+```
+
+The upstream `fix_ragas.png` reference is retained in the NASA project directory, and the project-specific README includes the compatibility guidance.
 
 ## Pull Request
 
-The current final-project work is tracked in the draft pull request:
+The current final-project work is tracked in:
 
 **PR #1 — Finalize NASA Mission Intelligence project and complete course exercises**
 
-The PR should remain unmerged until all runtime validation tasks are complete.
+The PR remains **Draft** and should not be merged until all runtime validation tasks are complete.
 
 ## Attribution
 
 Udacity-provided starter code, course materials, datasets, and reference/solution files retain their original attribution and license.
 
-New implementation work, repository maintenance, final-project integration, documentation, and commits in this fork are maintained under **Peyman Mohammad Hassan / @peymangraph**.
+New implementation work, repository maintenance, final-project integration, documentation, synchronization commits, and final-project commits in this fork are maintained under **Peyman Mohammad Hassan / @peymangraph**.
