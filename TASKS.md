@@ -15,7 +15,7 @@ GitHub Issues are currently disabled for this repository, so this file is the ac
 - [x] Add `batch_evaluate.py` with per-question and aggregate metrics.
 - [x] Add final setup and rubric-compliance documentation.
 - [x] Add GitHub Actions syntax/completeness workflow.
-- [ ] Confirm the GitHub Actions workflow runs successfully (no run has appeared yet).
+- [x] Confirm the GitHub Actions workflow runs successfully.
 - [ ] Run the full embedding pipeline with a valid OpenAI API key.
 - [ ] Run the Streamlit end-to-end smoke test against the populated ChromaDB.
 - [ ] Run the complete RAGAS batch evaluation and record the resulting metrics.
@@ -42,6 +42,6 @@ GitHub Issues are currently disabled for this repository, so this file is the ac
 - [x] Remove unrelated upstream merge commit `4cb9435` / `abdelrahmansaudmorad` from the ancestry of both `main` and `final-project`.
 - [x] Verify the fork includes the latest upstream `main` snapshot content from Udacity.
 - [x] Preserve Udacity attribution for starter/reference materials rather than falsely relabeling upstream work.
-- [ ] Review generated/cache artifacts before submission.
+- [x] Review generated/cache artifacts before submission; inherited Udacity reference artifacts retained.
 - [x] Promote the completed `final-project` snapshot to `main`.
 - [ ] Complete runtime validation and final submission audit on `main`.
