@@ -48,12 +48,10 @@ The completed coursework and NASA Mission Intelligence project are now on the re
 
 Complete these in order:
 
-1. **P0-01 — Confirm GitHub Actions workflow execution**
-2. **P0-02 — Run the full NASA embedding pipeline and populate ChromaDB**
-3. **P0-03 — Run the Streamlit end-to-end smoke test**
-4. **P0-04 — Run the complete RAGAS batch evaluation and record metrics**
-5. **P0-05 — Review generated/cache artifacts before submission**
-6. **P0-06 — Perform the final submission audit on `main`**
+1. Run the full NASA embedding pipeline and populate ChromaDB.
+2. Run the Streamlit end-to-end smoke test.
+3. Run the complete RAGAS batch evaluation and record metrics.
+4. Perform the final submission audit on `main`.
 
 The detailed completion checklist is maintained in **`TASKS.md`**.
 
