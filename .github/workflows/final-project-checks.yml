@@ -2,7 +2,7 @@ name: Final Project Checks
 
 on:
   push:
-    branches: [main, final-project]
+    branches: [main]
   pull_request:
     branches: [main]
 
