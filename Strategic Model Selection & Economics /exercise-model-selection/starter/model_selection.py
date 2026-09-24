@@ -1,92 +1,77 @@
-# Model Selection Exercise - Starter Template
-# TODO: Complete this script to compare different LLM configurations for specific tasks
+# Completed coursework implementation in @peymangraph's working repository.
+# Udacity starter/reference materials retain their original attribution and license.
+# Model Selection and Evaluation Script
+# This script demonstrates how to compare different LLM configurations for specific tasks
+# It tests reasoning vs generation capabilities across different model configurations
 
-# TODO: Import necessary libraries
-# Hint: You'll need openai, pandas, time, json, typing, datetime, numpy
 import openai
 from openai import OpenAI
-# TODO: Add remaining imports here
+import pandas as pd
+import time
+import json
+from typing import Dict, List, Tuple
+from datetime import datetime
+import numpy as np
 
-
-# TODO: Define model configurations for different use cases
-# Create a dictionary with two configurations:
-# 1. "reasoning_optimized" - for logical, step-by-step reasoning
-# 2. "generation_optimized" - for creative, varied responses
+# Configuration dictionary defining different model setups for specific use cases
+# Each configuration is optimized for different types of tasks
 MODEL_CONFIGS = {
+    # Configuration optimized for logical reasoning and step-by-step problem solving
     "reasoning_optimized": {
-        # TODO: Choose appropriate model for reasoning (hint: o-series models excel at reasoning)
-        "model": "",  
-        # TODO: Set temperature for consistent outputs (hint: lower values = more consistent)
-        "temperature": 0,
-        # TODO: Set max_tokens for response length
-        "max_tokens": 0,
+        "model": "o4-mini",  # O-series models excel at reasoning tasks
+        "temperature": 1.0,    # Only 1 accepted for this model
+        "max_tokens": 500,   # Sufficient tokens for detailed reasoning
         "description": "Uses o-series model for best logical, step-by-step reasoning"
     },
+    # Configuration optimized for creative content generation
     "generation_optimized": {
-        # TODO: Choose appropriate model for generation (hint: gpt-4o is excellent for creativity)
-        "model": "",
-        # TODO: Set temperature for creative variation (hint: higher values = more creative)
-        "temperature": 0,
-        # TODO: Set max_tokens for response length
-        "max_tokens": 0,
-        # TODO: Add top_p parameter for nucleus sampling
-        "top_p": 0,
+        "model": "gpt-4o",   # GPT-4o provides excellent creative capabilities
+        "temperature": 1.0,  # Higher temperature encourages creative variation
+        "max_tokens": 500,   # Allow for longer creative responses
+        "top_p": 0.95,      # Nucleus sampling for diverse but coherent outputs
         "description": "High temperature for creative, varied responses"
     }
 }
 
-# TODO: Define reasoning test prompts
-# Create a list of dictionaries, each containing:
-# - "id": unique identifier
-# - "prompt": the test question
-# - "expected_answer": what the correct response should be
-# - "description": what this test evaluates
+# Test prompts designed to evaluate reasoning capabilities
+# These prompts require logical thinking, mathematical calculation, and step-by-step analysis
 REASONING_PROMPTS = [
     {
         "id": "math_word_problem",
-        # TODO: Create a math word problem (hint: simple arithmetic with context)
-        "prompt": "",
-        # TODO: Provide the expected numerical answer
-        "expected_answer": "",
+        "prompt": "Given the following passage, answer the factual question: Passage: 'Sarah inherits 5 apples. She gives two to Tom and buys three more at the store. How many apples does Sarah have now?'",
+        "expected_answer": "6 apples",  # 5 - 2 + 3 = 6
         "description": "Simple arithmetic word problem"
     },
     {
-        "id": "logical_deduction",
-        # TODO: Create a logical reasoning problem (hint: if-then statements)
-        "prompt": "",
-        # TODO: Provide the logical conclusion
-        "expected_answer": "",
+        "id": "logical_deduction", 
+        "prompt": "Analyze this logical sequence: If all cats are animals, and Fluffy is a cat, what can we conclude about Fluffy? Provide your reasoning step by step.",
+        "expected_answer": "Fluffy is an animal",  # Basic syllogistic reasoning
         "description": "Basic syllogistic reasoning"
     },
     {
         "id": "business_calculation",
-        # TODO: Create a multi-step percentage calculation problem
-        "prompt": "",
-        # TODO: Provide the calculated result
-        "expected_answer": "",
+        "prompt": "A company's revenue increased by 20% in Q1, then decreased by 15% in Q2. If Q1 revenue was $100,000, what was the Q2 revenue? Show your calculation.",
+        "expected_answer": "$102,000",  # 100,000 * 1.20 * 0.85 = 102,000
         "description": "Multi-step business calculation"
     }
 ]
 
-# TODO: Define generation test prompts
-# Create a list of dictionaries for creative tasks:
+# Test prompts designed to evaluate creative generation capabilities
+# These prompts require imagination, creativity, and varied language use
 GENERATION_PROMPTS = [
     {
         "id": "creative_storytelling",
-        # TODO: Create a creative writing prompt
-        "prompt": "",
+        "prompt": "Write a two-paragraph creative story about a cat that travels to outer space.",
         "description": "Open-ended creative writing task requiring imagination and narrative skills"
     },
     {
         "id": "marketing_copy",
-        # TODO: Create a marketing content generation prompt
-        "prompt": "",
+        "prompt": "Create an engaging product description for a revolutionary smart water bottle that tracks hydration and reminds users to drink water.",
         "description": "Persuasive marketing content requiring creativity and sales language"
     },
     {
-        "id": "creative_dialogue",
-        # TODO: Create a dialogue writing prompt
-        "prompt": "",
+        "id": "creative_dialogue", 
+        "prompt": "Write a humorous dialogue between a coffee cup and a tea bag arguing about which beverage is superior.",
         "description": "Character-based creative writing requiring humor and personality"
     }
 ]
@@ -94,12 +79,6 @@ GENERATION_PROMPTS = [
 def call_openai_api(prompt: str, config: Dict) -> Dict:
     """
     Make API call to OpenAI and capture comprehensive response metrics.
-    
-    TODO: Complete this function to:
-    1. Initialize OpenAI client
-    2. Make API call with given configuration
-    3. Measure response time
-    4. Return structured results with metrics
     
     Args:
         prompt (str): The input prompt to send to the model
@@ -109,44 +88,42 @@ def call_openai_api(prompt: str, config: Dict) -> Dict:
         Dict: Response data including content, performance metrics, and error handling
     """
     print(f"  🔄 Calling {config['model']} (temp: {config['temperature']})...")
-    
-    # TODO: Record start time for latency measurement
-    start_time = 0
+    start_time = time.time()  # Start timing the API call
     
     try:
-        # TODO: Initialize OpenAI client with your API key
-        # SECURITY NOTE: Use environment variables for API keys in production
-        client = OpenAI(api_key="YOUR_API_KEY_HERE")
+        # Initialize OpenAI client with API key
+        # Note: In production, use environment variables for API keys
+        client = OpenAI(api_key = "your-key-here")
         
-        # TODO: Make the API call
-        # Hint: Use client.chat.completions.create() with:
-        # - model from config
-        # - messages with user role and prompt content
-        # - temperature from config
-        # - max_completion_tokens from config
-        response = None
+        # Make the API call with specified configuration
+        response = client.chat.completions.create(
+            model=config["model"],
+            messages=[{"role": "user", "content": prompt}],
+            temperature=config["temperature"],
+            max_completion_tokens=config["max_tokens"],
+            # Note: top_p is commented out as it may not be supported by all models
+            #top_p=config["top_p"]
+        )
         
-        # TODO: Calculate latency in milliseconds
-        end_time = 0
-        latency = 0
+        end_time = time.time()
+        latency = (end_time - start_time) * 1000  # Convert to milliseconds
         
-        # TODO: Structure the successful response
-        # Include: response content, latency, token usage, success status
+        # Structure the successful response with all relevant metrics
         result = {
-            "response": "",
-            "latency_ms": 0,
-            "tokens_used": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
+            "response": response.choices[0].message.content,
+            "latency_ms": round(latency, 2),
+            "tokens_used": response.usage.total_tokens,
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
             "success": True,
             "error": None
         }
-        
+        print(response)  # Debug output to see full API response
         print(f"  ✅ Success! Latency: {result['latency_ms']}ms, Tokens: {result['tokens_used']}")
         return result
         
     except Exception as e:
-        # TODO: Handle API errors gracefully
+        # Handle API errors gracefully and return structured error response
         print(f"Error: {str(e)}")
         return {
             "response": None, "latency_ms": None, "tokens_used": None,
@@ -368,32 +345,7 @@ def test_generation_task(task_index=0):
     
     return results
 
-# TODO: Example usage - uncomment and test when ready
-# Test the first generation task to demonstrate the comparison
-# generation_results_1 = test_generation_task(0)
-
-# TODO: Additional test examples you can run:
-# reasoning_results_1 = test_reasoning_task(0)  # Math problem
-# reasoning_results_2 = test_reasoning_task(1)  # Logic deduction  
-# reasoning_results_3 = test_reasoning_task(2)  # Business calculation
-# generation_results_2 = test_generation_task(1)  # Marketing copy
-# generation_results_3 = test_generation_task(2)  # Dialogue
-
-"""
-EXERCISE COMPLETION CHECKLIST:
-□ Import all necessary libraries
-□ Complete MODEL_CONFIGS with appropriate models and parameters
-□ Fill in all REASONING_PROMPTS with test questions and expected answers
-□ Fill in all GENERATION_PROMPTS with creative writing tasks
-□ Implement call_openai_api() function with proper API calls and error handling
-□ Test your implementation with the example usage
-□ Add your own API key and test the complete workflow
-
-BONUS CHALLENGES:
-□ Add visualization of results using matplotlib/seaborn
-□ Implement statistical significance testing
-□ Add cost calculation for API usage
-□ Create a summary report function
-□ Add more diverse test prompts
-□ Implement confidence intervals for scores
-"""
+# Example usage: Run the first generation task to demonstrate the comparison
+# This will test both model configurations on the creative storytelling task
+generation_results_1 = test_generation_task(0)
+reasoning_results_1 = test_reasoning_task(0)

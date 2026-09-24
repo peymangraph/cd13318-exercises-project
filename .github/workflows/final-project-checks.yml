@@ -1,0 +1,51 @@
+name: Final Project Checks
+
+on:
+  push:
+    branches: [final-project]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Compile all Python files
+        run: python -m compileall -q .
+
+      - name: Verify final-project files contain no TODO markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          project = Path("Project-NASA-Mission-Intelligence-Starter")
+          required = [
+              project / "embedding_pipeline.py",
+              project / "rag_client.py",
+              project / "llm_client.py",
+              project / "ragas_evaluator.py",
+              project / "chat.py",
+              project / "batch_evaluate.py",
+              project / "evaluation_dataset.txt",
+          ]
+          missing = [str(path) for path in required if not path.exists()]
+          if missing:
+              raise SystemExit(f"Missing required files: {missing}")
+
+          todo_files = []
+          for path in required:
+              if path.suffix == ".py" and "TODO" in path.read_text(encoding="utf-8"):
+                  todo_files.append(str(path))
+          if todo_files:
+              raise SystemExit(f"TODO markers remain in: {todo_files}")
+
+          print("Required final-project files are present and TODO-free.")
+          PY

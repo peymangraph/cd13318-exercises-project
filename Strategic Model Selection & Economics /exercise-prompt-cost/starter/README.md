@@ -1,167 +1,135 @@
-# Prompt Engineering and Cost Evaluation Exercise - Starter Guide
+# Prompt Engineering and Cost Evaluation Exercise - Solution
 
 ## Purpose of this Folder
 
-This folder contains the starter code and instructions for the Prompt Engineering and Cost Evaluation exercise. You'll learn how to optimize prompts for both effectiveness and cost efficiency by completing the `prompt_cost_evaluation.py` template. This exercise focuses on real-world business considerations where balancing quality with budget constraints is essential.
+This folder contains the complete solution to the prompt engineering and cost evaluation exercise, demonstrating how to optimize prompts for both effectiveness and cost efficiency. The solution includes comprehensive code examples, cost analysis frameworks, and best practices for balancing quality with budget constraints in real-world LLM applications.
 
-## Learning Objectives
+## Solution Overview
 
-By completing this exercise, you will:
+The `prompt_cost_evaluation.py` script demonstrates a systematic approach to prompt optimization that considers both output quality and financial cost. This solution teaches students how to:
 
-1. **Master Prompt Engineering**: Understand how prompt complexity affects output quality and cost
-2. **Implement Cost Analysis**: Build comprehensive cost tracking and optimization systems
-3. **Evaluate Trade-offs**: Learn to balance quality requirements with budget constraints
-4. **Make Data-Driven Decisions**: Use metrics to choose optimal prompt strategies
-5. **Apply Business Thinking**: Consider real-world financial implications of LLM usage
+- Design prompt strategies with different complexity levels
+- Implement comprehensive cost tracking and analysis
+- Evaluate quality-cost trade-offs objectively
+- Make data-driven decisions about prompt engineering
+- Build cost-effective LLM applications for business use
 
-## Exercise Overview
+## Key Learning Objectives
 
-You'll complete a Python script that:
-- Defines three prompt strategies with different cost-effectiveness profiles (minimal, standard, premium)
-- Implements comprehensive cost tracking for different OpenAI models
-- Tests prompt strategies across three task categories (summarization, creative writing, problem solving)
-- Analyzes cost-effectiveness trade-offs and provides business recommendations
-- Creates comparison frameworks for systematic prompt optimization
+By studying this solution, students will understand:
 
-## Getting Started
+1. **Prompt Engineering Strategy**: How prompt complexity affects both quality and cost
+2. **Cost Analysis Methodology**: Systematic approaches to tracking and optimizing LLM expenses
+3. **Quality-Cost Trade-offs**: Balancing output effectiveness with budget constraints
+4. **Business Decision Making**: Using metrics to choose optimal prompt strategies
+5. **Real-world Application**: Practical considerations for production LLM systems
+
+## Solution Components
+
+### 1. Prompt Strategy Configurations (`PROMPT_CONFIGS`)
+
+The solution defines three distinct cost-effectiveness strategies:
+
+- **Minimal Strategy**: Uses gpt-4o-mini with limited tokens for budget optimization
+- **Standard Strategy**: Uses gpt-4o with moderate tokens for balanced performance
+- **Premium Strategy**: Uses gpt-4o with higher tokens for maximum quality
+
+### 2. Cost Tracking System (`MODEL_PRICING`)
+
+Comprehensive pricing data for accurate cost calculations:
+- Input and output token pricing for different models
+- Real-time cost calculation during API calls
+- Cost-per-token and total cost metrics
+
+### 3. Prompt Strategy Framework (`PROMPT_STRATEGIES`)
+
+Three categories of tasks with progressive prompt complexity:
+
+**Task Completion (Summarization)**:
+- Minimal: Basic instruction without context
+- Standard: Clear instruction with specific guidance
+- Premium: Detailed instruction with role-playing and formatting requirements
+
+**Creative Writing**:
+- Minimal: Simple creative prompt without constraints
+- Standard: Structured prompt with length and content specifications
+- Premium: Comprehensive prompt with detailed requirements and quality guidelines
+
+**Problem Solving (Business Consultation)**:
+- Minimal: Direct question without context
+- Standard: Contextualized question with specific details
+- Premium: Expert consultation prompt with structured deliverables
+
+### 4. Evaluation and Analysis Functions
+
+**`call_openai_api()`**: 
+- Extended API integration with comprehensive cost tracking
+- Real-time cost calculation based on token usage
+- Performance metrics collection (latency, tokens, costs)
+
+**`score_response_quality()`**:
+- Category-specific quality evaluation on 1-5 scale
+- Task completion: Completeness and structure analysis
+- Creative writing: Narrative elements and creativity assessment
+- Problem solving: Actionability and comprehensiveness evaluation
+
+**`calculate_cost_effectiveness()`**:
+- Quality-to-cost ratio calculation
+- Standardized metric for strategy comparison
+- Budget optimization guidance
+
+### 5. Testing and Comparison Framework
+
+**`test_prompt_strategy()`**:
+- Single strategy testing with comprehensive metrics
+- Detailed cost breakdown and quality analysis
+- Professional output formatting for analysis
+
+**`compare_prompt_strategies()`**:
+- Systematic comparison across all strategy types
+- Pandas-based comparison tables
+- Multi-criteria recommendations (best cost-effectiveness, highest quality, lowest cost)
+
+## How to Use This Solution
 
 ### Prerequisites
 
-1. **Python Environment**: Ensure you have Python 3.8+ installed
-2. **Required Libraries**: Install the necessary packages:
-   ```bash
-   pip install openai pandas matplotlib seaborn numpy
-   ```
-3. **OpenAI API Key**: You'll need an OpenAI API key with credits
-   - Sign up at [OpenAI Platform](https://platform.openai.com/)
-   - Generate an API key from your dashboard
-   - **Important**: Monitor your usage as this exercise involves cost analysis
-
-### File Structure
-
-```
-starter/
-├── README.md (this file)
-└── prompt_cost_evaluation.py (template to complete)
+1. Install required dependencies:
+```bash
+pip install openai pandas matplotlib seaborn numpy
 ```
 
-## Step-by-Step Instructions
+2. Set up your OpenAI API key:
+   - Replace the hardcoded API key with your own
+   - For production use, store API keys in environment variables
 
-### Step 1: Complete the Imports
-Add the missing import statements at the top of `prompt_cost_evaluation.py`:
+### Running the Solution
+
+1. **Single Strategy Testing**:
 ```python
-import pandas as pd
-import time
-import json
-from typing import Dict, List, Tuple
-import matplotlib.pyplot as plt
-import seaborn as sns
-from datetime import datetime
-import numpy as np
+# Test a specific prompt strategy
+result = test_prompt_strategy("task_completion", "minimal")
 ```
 
-### Step 2: Configure Prompt Strategies
-Fill in the `PROMPT_CONFIGS` dictionary with three cost-effectiveness strategies:
-
-**For minimal strategy:**
-- Model: "gpt-4o-mini" (most cost-effective)
-- Temperature: 0.7 (balanced for consistency)
-- Max tokens: 150 (limited to control costs)
-
-**For standard strategy:**
-- Model: "gpt-4o" (balanced performance)
-- Temperature: 0.7 (consistent results)
-- Max tokens: 300 (moderate length)
-
-**For premium strategy:**
-- Model: "gpt-4o" (high performance)
-- Temperature: 0.5 (more consistent)
-- Max tokens: 500 (detailed responses)
-
-### Step 3: Research and Input Pricing Data
-Complete the `MODEL_PRICING` dictionary with current OpenAI pricing:
-
-1. Visit the [OpenAI Pricing Page](https://openai.com/pricing)
-2. Find current rates for:
-   - gpt-4o-mini (input and output tokens)
-   - gpt-4o (input and output tokens)
-   - gpt-4-turbo (input and output tokens)
-3. Convert prices to per-1K-token rates in USD
-
-**Example format:**
+2. **Complete Strategy Comparison**:
 ```python
-"gpt-4o-mini": {
-    "input": 0.00015,   # $0.15 per 1M tokens = $0.00015 per 1K
-    "output": 0.0006    # $0.60 per 1M tokens = $0.0006 per 1K
-}
+# Compare all strategies for a category
+results = compare_prompt_strategies("task_completion")
 ```
 
-### Step 4: Design Prompt Strategies
-Create comprehensive `PROMPT_STRATEGIES` for three categories:
-
-**Task Completion (Summarization):**
-- **Minimal**: "Summarize this text: [TEXT_PLACEHOLDER]"
-- **Standard**: "Please provide a concise summary of the following text, focusing on the main points: [TEXT_PLACEHOLDER]"
-- **Premium**: "You are an expert analyst. Provide a comprehensive summary with: 1) Main points, 2) Key evidence, 3) Conclusions. Format with headings: [TEXT_PLACEHOLDER]"
-
-**Creative Writing:**
-- **Minimal**: "Write a story about a robot."
-- **Standard**: "Write a short story (200-300 words) about a robot discovering emotions. Include dialogue."
-- **Premium**: "You are a skilled author. Write a compelling story (200-300 words) about a robot discovering emotions. Requirements: 1) Meaningful dialogue, 2) Emotional journey, 3) Narrative arc, 4) Vivid descriptions."
-
-**Problem Solving:**
-- **Minimal**: "How do I reduce customer churn?"
-- **Standard**: "I'm running a SaaS business with 15% monthly churn. What strategies can reduce churn?"
-- **Premium**: "You are a business consultant. My SaaS has 15% churn, $50 ARPU, 6-month LTV. Provide: 1) Root cause analysis, 2) Actionable strategies, 3) Implementation timeline, 4) ROI projections."
-
-### Step 5: Create Sample Content
-Write a substantial `SAMPLE_TEXT` (200-300 words) about a relevant topic like AI, technology, or business. This will be used for summarization testing.
-
-### Step 6: Implement Core Functions
-
-**`call_openai_api()` Function:**
-1. **Timing**: Record start/end times for latency calculation
-2. **API Call**: Use `client.chat.completions.create()` with proper parameters
-3. **Cost Calculation**: 
-   ```python
-   input_cost = (response.usage.prompt_tokens / 1000) * MODEL_PRICING[model_name]["input"]
-   output_cost = (response.usage.completion_tokens / 1000) * MODEL_PRICING[model_name]["output"]
-   total_cost = input_cost + output_cost
-   ```
-4. **Error Handling**: Graceful handling of API failures
-
-**`score_response_quality()` Function:**
-Implement category-specific scoring:
-
-- **Task Completion**: Look for summary indicators ("main", "key", "important"), check length and structure
-- **Creative Writing**: Check for narrative elements, dialogue, descriptive language
-- **Problem Solving**: Look for strategy words, analysis terms, actionable advice
-
-**`calculate_cost_effectiveness()` Function:**
+3. **Multi-Category Analysis**:
 ```python
-if total_cost == 0:
-    return 0.0
-return (quality_score / total_cost) * 1000  # Quality points per $1000
+# Test all categories
+task_results = compare_prompt_strategies("task_completion")
+creative_results = compare_prompt_strategies("creative_writing")
+business_results = compare_prompt_strategies("problem_solving")
 ```
 
-### Step 7: Build Testing Framework
+### Expected Output
 
-**`test_prompt_strategy()` Function:**
-1. Find the strategy from `PROMPT_STRATEGIES`
-2. Replace `[TEXT_PLACEHOLDER]` with `SAMPLE_TEXT` if needed
-3. Make API call and calculate metrics
-4. Display comprehensive results with cost breakdown
+The solution provides detailed analysis including:
 
-**`compare_prompt_strategies()` Function:**
-1. Test all three strategies for a category
-2. Create pandas DataFrame for comparison
-3. Provide recommendations for best cost-effectiveness, quality, and cost
-
-## Expected Behavior
-
-When working correctly, your script should:
-
-### Single Strategy Test Output:
+#### Single Strategy Results:
 ```
 🧪 TESTING PROMPT STRATEGY: TASK_COMPLETION - MINIMAL
 Description: Basic instruction without context or examples
@@ -170,12 +138,12 @@ Model: gpt-4o-mini | Temp: 0.7 | Max Tokens: 150
 
 📝 RESPONSE:
 ------------------------------------------------------------
-[Model's actual response to your prompt]
+[Model's response to the prompt]
 ------------------------------------------------------------
 
 📊 METRICS:
 ✅ Quality Score: 4/5
-⏱️  Latency: 1250ms
+⏱️  Latency: 1250.5ms
 🔢 Tokens Used: 85 (Input: 45, Output: 40)
 💰 Cost Breakdown:
    Input Cost: $0.000007
@@ -185,7 +153,7 @@ Model: gpt-4o-mini | Temp: 0.7 | Max Tokens: 150
 📈 Cost-Effectiveness: 129032.26 quality points per $1000
 ```
 
-### Strategy Comparison Output:
+#### Strategy Comparison Results:
 ```
 📊 STRATEGY COMPARISON SUMMARY:
 ================================================================================
@@ -196,145 +164,152 @@ Model: gpt-4o-mini | Temp: 0.7 | Max Tokens: 150
 
 💡 RECOMMENDATIONS:
 🏆 Best Cost-Effectiveness: Minimal strategy
+   Quality: 4/5, Cost: $0.000031
 ⭐ Highest Quality: Premium strategy
+   Quality: 5/5, Cost: $0.000298
 💰 Lowest Cost: Minimal strategy
+   Quality: 4/5, Cost: $0.000031
 ```
 
-## Testing Strategy
+## Key Insights from the Solution
 
-### Recommended Testing Order:
+### 1. Prompt Complexity Impact
+- **Minimal prompts**: Often sufficient for simple tasks, excellent cost-effectiveness
+- **Standard prompts**: Balanced approach, good for most business applications
+- **Premium prompts**: Highest quality but diminishing returns on cost
 
-1. **Test Imports**: Run the file to verify all imports work
-2. **Test Configuration**: Print configurations to verify structure
-3. **Test Pricing**: Verify cost calculations with sample data
-4. **Test Single API Call**: Start with one simple prompt
-5. **Test Scoring**: Verify quality scoring with sample responses
-6. **Test Full Strategy**: Run complete single strategy test
-7. **Test Comparison**: Run full strategy comparison
+### 2. Model Selection Strategy
+- **gpt-4o-mini**: Exceptional cost-effectiveness for straightforward tasks
+- **gpt-4o**: Best balance of capability and cost for complex tasks
+- **Model choice**: More important than prompt complexity for cost optimization
 
-### Validation Checklist:
+### 3. Cost-Quality Trade-offs
+- **Linear cost scaling**: More complex prompts and models increase costs predictably
+- **Non-linear quality gains**: Quality improvements often plateau with complexity
+- **Sweet spot identification**: Standard strategies often provide optimal value
 
-- [ ] All imports successful
-- [ ] PROMPT_CONFIGS properly configured with realistic parameters
-- [ ] MODEL_PRICING filled with current OpenAI rates
-- [ ] All PROMPT_STRATEGIES have meaningful content
-- [ ] SAMPLE_TEXT is substantial and relevant
-- [ ] API calls return successful responses with cost data
-- [ ] Quality scoring returns reasonable scores (1-5)
-- [ ] Cost calculations are accurate
-- [ ] Comparison function provides clear recommendations
-
-## Business Context and Applications
-
-### Why This Exercise Matters:
-
-1. **Real-world Constraints**: Production LLM applications must balance quality with cost
-2. **Scalability**: Small cost differences become significant at scale
-3. **ROI Optimization**: Understanding cost-effectiveness helps maximize business value
-4. **Budget Management**: Organizations need predictable LLM spending
-5. **Strategic Decision Making**: Data-driven prompt optimization
-
-### Industry Applications:
-
-**Content Marketing:**
-- Blog post generation with budget constraints
-- Social media content at scale
-- Email marketing optimization
-
-**Customer Support:**
-- Automated response quality vs. cost analysis
-- Escalation criteria based on complexity
-- Volume-based optimization
-
-**Business Intelligence:**
-- Report generation with varying detail levels
-- Executive summaries vs. detailed analysis
-- Automated insights with cost controls
-
-## Cost Optimization Insights
-
-### Key Learnings to Discover:
-
-1. **Model Selection Impact**: Often more important than prompt complexity
-2. **Diminishing Returns**: Premium prompts may not justify additional cost
-3. **Task Matching**: Simple tasks often work well with minimal strategies
-4. **Volume Considerations**: Cost differences compound at scale
-5. **Quality Thresholds**: Define minimum acceptable quality levels
-
-### Business Decision Framework:
-
-- **Budget-Constrained**: Use minimal strategies, focus on cost-effectiveness
-- **Quality-Critical**: Use premium strategies, justify with business value
-- **Balanced Approach**: Standard strategies often provide optimal value
-- **Scale Considerations**: Test at expected production volumes
-
-## Troubleshooting
-
-### Common Issues and Solutions:
-
-1. **API Key Errors**:
-   - Verify your API key is correct and active
-   - Check that you have sufficient credits
-   - Ensure proper key formatting
-
-2. **Cost Calculation Errors**:
-   - Verify MODEL_PRICING data is current
-   - Check unit conversions (per 1K vs per 1M tokens)
-   - Ensure proper decimal precision
-
-3. **Quality Scoring Issues**:
-   - Test scoring functions with sample responses
-   - Adjust scoring criteria based on actual outputs
-   - Consider edge cases (very short/long responses)
-
-4. **Rate Limiting**:
-   - Add delays between API calls
-   - Monitor your usage limits
-   - Implement exponential backoff for retries
-
-5. **Unexpected Costs**:
-   - Monitor token usage carefully
-   - Set max_tokens appropriately
-   - Test with small samples first
+### 4. Business Decision Framework
+- **Budget constraints**: Use minimal strategies when cost is primary concern
+- **Quality requirements**: Use premium strategies when output quality is critical
+- **Volume considerations**: Cost differences compound significantly at scale
 
 ## Extension Opportunities
 
-Once you complete the basic exercise, try these enhancements:
+Students can extend this solution by:
 
-### Advanced Features:
-1. **Budget Optimization**: Create functions that recommend strategies based on budget constraints
-2. **Batch Analysis**: Test multiple prompts simultaneously for statistical significance
-3. **Visualization**: Create cost vs. quality scatter plots and trend analysis
-4. **A/B Testing**: Framework for comparing custom prompt variations
-5. **Cost Forecasting**: Predict monthly costs based on usage patterns
-6. **ROI Calculator**: Business value analysis for quality improvements
+1. **Advanced Cost Analysis**: 
+   - Monthly budget forecasting based on usage patterns
+   - Cost optimization algorithms for different use cases
+   - ROI calculations for quality improvements
 
-### Production Features:
-1. **Monitoring Dashboard**: Real-time cost and quality tracking
-2. **Alert System**: Notifications for budget thresholds
-3. **Caching Layer**: Store responses to reduce duplicate costs
-4. **Load Balancing**: Distribute requests across models for cost optimization
+2. **Enhanced Quality Metrics**:
+   - Multi-dimensional quality scoring
+   - Human evaluation integration
+   - A/B testing frameworks for prompt comparison
 
-## Success Criteria
+3. **Production Features**:
+   - Automated prompt selection based on budget constraints
+   - Real-time cost monitoring and alerts
+   - Batch processing optimization for cost efficiency
 
-You've successfully completed the exercise when:
+4. **Visualization and Reporting**:
+   - Cost vs. quality scatter plots
+   - Time-series cost analysis
+   - Executive dashboards for LLM spending
 
-- [ ] Your script runs without errors
-- [ ] All three prompt strategies make successful API calls
-- [ ] Cost calculations are accurate and realistic
-- [ ] Quality scoring provides meaningful differentiation
-- [ ] Strategy comparison provides clear business recommendations
-- [ ] You understand the trade-offs between cost and quality
-- [ ] You can explain when to use each strategy type
+5. **Advanced Prompt Engineering**:
+   - Dynamic prompt generation based on context
+   - Few-shot learning optimization
+   - Chain-of-thought cost analysis
 
-## Key Takeaways
+6. **Integration Capabilities**:
+   - Database integration for cost tracking
+   - API endpoints for prompt optimization services
+   - Integration with business intelligence tools
 
-This exercise teaches essential skills for production LLM applications:
+## Best Practices Demonstrated
 
-1. **Cost Consciousness**: Always consider financial implications
-2. **Quality Measurement**: Develop objective evaluation methods
-3. **Business Thinking**: Balance technical capabilities with business needs
-4. **Data-Driven Decisions**: Use metrics to guide strategy selection
-5. **Scalability Planning**: Consider costs at production volumes
+1. **Systematic Evaluation**: Structured approach to prompt comparison
+2. **Cost Consciousness**: Always consider financial implications of LLM usage
+3. **Quality Metrics**: Objective evaluation methods for subjective outputs
+4. **Business Focus**: Practical considerations for real-world applications
+5. **Scalability Planning**: Design patterns that work at enterprise scale
+6. **Documentation**: Comprehensive logging and analysis for decision making
 
-Remember: The goal is not just to make the code work, but to understand how to build cost-effective LLM applications that deliver business value while staying within budget constraints!
+## Real-World Applications
+
+This solution framework applies to:
+
+### 1. Content Generation Services
+- Blog post writing with budget constraints
+- Marketing copy optimization for cost-effectiveness
+- Social media content at scale
+
+### 2. Customer Support Automation
+- Response quality vs. cost analysis
+- Escalation criteria based on complexity
+- Volume-based cost optimization
+
+### 3. Business Intelligence
+- Report generation with varying detail levels
+- Executive summary vs. detailed analysis trade-offs
+- Automated insights with cost controls
+
+### 4. Educational Technology
+- Personalized feedback with budget limits
+- Adaptive content generation based on cost constraints
+- Scalable tutoring systems
+
+## Cost Optimization Strategies
+
+### 1. Prompt Design Principles
+- **Clarity over complexity**: Simple, clear prompts often perform as well as complex ones
+- **Context efficiency**: Provide necessary context without redundancy
+- **Output constraints**: Specify desired length to control output costs
+
+### 2. Model Selection Guidelines
+- **Task matching**: Use simpler models for straightforward tasks
+- **Quality thresholds**: Define minimum acceptable quality levels
+- **Cost ceilings**: Set maximum cost per interaction limits
+
+### 3. Operational Efficiency
+- **Batch processing**: Group similar requests to reduce overhead
+- **Caching strategies**: Store and reuse responses for common queries
+- **Monitoring systems**: Track costs and quality metrics continuously
+
+## Security and Compliance Considerations
+
+1. **API Key Management**: Secure storage and rotation of credentials
+2. **Cost Controls**: Implement spending limits and alerts
+3. **Data Privacy**: Ensure prompts don't contain sensitive information
+4. **Audit Trails**: Maintain logs for cost analysis and compliance
+5. **Rate Limiting**: Implement controls to prevent unexpected charges
+
+## Troubleshooting Common Issues
+
+### Cost-Related Issues:
+1. **Unexpected high costs**: Check token usage and model selection
+2. **Budget overruns**: Implement cost monitoring and alerts
+3. **Inefficient prompts**: Analyze cost-effectiveness ratios
+
+### Quality Issues:
+1. **Inconsistent outputs**: Adjust temperature and prompt specificity
+2. **Poor performance**: Consider upgrading to higher-tier models
+3. **Task mismatch**: Ensure prompt strategy matches task complexity
+
+### Technical Issues:
+1. **API errors**: Implement robust error handling and retries
+2. **Rate limiting**: Add appropriate delays between requests
+3. **Token limits**: Monitor and adjust max_tokens parameters
+
+## Success Metrics
+
+Measure solution effectiveness through:
+
+1. **Cost Efficiency**: Cost per quality point achieved
+2. **Quality Consistency**: Variance in output quality scores
+3. **Business Impact**: ROI of LLM implementation
+4. **User Satisfaction**: End-user feedback on output quality
+5. **Operational Efficiency**: Time saved through automation
+
+This solution provides a comprehensive foundation for understanding and implementing cost-effective prompt engineering strategies in real-world applications. It demonstrates how to balance quality requirements with budget constraints while maintaining systematic evaluation and optimization processes.

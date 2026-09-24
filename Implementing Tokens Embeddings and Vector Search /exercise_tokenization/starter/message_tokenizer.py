@@ -1,17 +1,10 @@
+# Completed coursework implementation in @peymangraph's working repository.
+# Udacity starter/reference materials retain their original attribution and license.
 """
-Message Tokenization and Cost Optimization
+Message Tokenization and Cost Optimization - SOLUTION
 Lesson 6: Token Management for Customer Service
 
-This exercise teaches you how to count tokens, estimate API costs, and optimize
-message processing for a customer service chatbot. Understanding tokens helps you
-control costs and handle long customer messages efficiently.
-
-Learning Objectives:
-- Count tokens in customer messages using tiktoken
-- Estimate API costs based on token counts
-- Optimize conversation history to fit within token limits
-- Split long messages into manageable chunks
-- Make cost-aware decisions in chatbot design
+This is the complete solution for the tokenization exercise.
 """
 
 import tiktoken
@@ -23,9 +16,6 @@ from openai import OpenAI
 class MessageTokenizer:
     """
     Handles tokenization and cost optimization for customer service messages.
-
-    This class helps you understand how tokens work and manage API costs
-    by counting tokens, estimating costs, and optimizing message history.
     """
 
     def __init__(self, model: str = "gpt-3.5-turbo"):
@@ -35,26 +25,34 @@ class MessageTokenizer:
         Args:
             model: The model to use for tokenization (default: gpt-3.5-turbo)
         """
-        # TODO: Store the model name
-        self.model = None
+        self.model = model
 
-        # TODO: Initialize the tokenizer using tiktoken
-        # Hint: Use tiktoken.encoding_for_model(model)
-        # This loads the correct encoding for the model
-        self.encoding = None
+        # Initialize the tokenizer using tiktoken
+        try:
+            self.encoding = tiktoken.encoding_for_model(model)
+        except KeyError:
+            # Fallback to cl100k_base for unknown models
+            self.encoding = tiktoken.get_encoding("cl100k_base")
 
-        # TODO: Define pricing for different models (cost per 1K tokens)
-        # Format: {model_name: {"input": cost, "output": cost}}
-        # GPT-3.5-turbo: $0.0005 per 1K input tokens, $0.0015 per 1K output tokens
-        # GPT-4: $0.03 per 1K input tokens, $0.06 per 1K output tokens
-        self.pricing = {}
+        # Define pricing for different models (cost per 1K tokens)
+        self.pricing = {
+            "gpt-3.5-turbo": {
+                "input": 0.0005,
+                "output": 0.0015
+            },
+            "gpt-4": {
+                "input": 0.03,
+                "output": 0.06
+            },
+            "gpt-4-turbo": {
+                "input": 0.01,
+                "output": 0.03
+            }
+        }
 
     def count_tokens(self, text: str) -> int:
         """
         Count the number of tokens in a text string.
-
-        This is the foundation for understanding API costs. Each API call
-        charges based on the number of tokens processed.
 
         Args:
             text: The text to tokenize
@@ -62,18 +60,16 @@ class MessageTokenizer:
         Returns:
             Number of tokens in the text
         """
-        # TODO: Use the encoding to count tokens
-        # Hint: Use self.encoding.encode(text) to get token list
-        # Then return the length of that list
-        pass
+        if not text:
+            return 0
+
+        # Encode the text and count tokens
+        tokens = self.encoding.encode(text)
+        return len(tokens)
 
     def count_message_tokens(self, messages: List[Dict[str, str]]) -> int:
         """
         Count tokens in a message list (conversation format).
-
-        The OpenAI API uses a message format with roles. Each message has
-        some overhead tokens beyond just the content. This function accounts
-        for that overhead.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
@@ -81,15 +77,21 @@ class MessageTokenizer:
         Returns:
             Total number of tokens including message overhead
         """
-        # TODO: Count tokens for a conversation
-        # For each message:
-        # 1. Count tokens in the content
-        # 2. Add overhead tokens (approximately 4 tokens per message for role formatting)
-        # 3. Add a small base overhead (approximately 3 tokens for the conversation)
+        if not messages:
+            return 0
 
-        # Hint: Start with 3 tokens for base overhead
-        # Then for each message, add 4 + count_tokens(content)
-        pass
+        # Start with base overhead for conversation formatting
+        total_tokens = 3
+
+        for message in messages:
+            # Each message has overhead: role formatting + content
+            total_tokens += 4  # Message formatting overhead
+
+            # Count tokens in role and content
+            total_tokens += self.count_tokens(message.get("role", ""))
+            total_tokens += self.count_tokens(message.get("content", ""))
+
+        return total_tokens
 
     def estimate_cost(
         self,
@@ -100,9 +102,6 @@ class MessageTokenizer:
         """
         Estimate the cost of an API call based on token counts.
 
-        Understanding costs helps you make smart decisions about how to
-        structure your chatbot conversations and when to optimize.
-
         Args:
             input_tokens: Number of input tokens (prompt + history)
             output_tokens: Number of output tokens (response)
@@ -111,14 +110,21 @@ class MessageTokenizer:
         Returns:
             Estimated cost in dollars
         """
-        # TODO: Calculate the cost based on pricing
-        # 1. Get the model to use (parameter or self.model)
-        # 2. Get pricing for that model from self.pricing
-        # 3. Calculate: (input_tokens / 1000) * input_price + (output_tokens / 1000) * output_price
-        # 4. Return the total cost
+        # Use provided model or default
+        model_name = model or self.model
 
-        # Hint: Pricing is per 1000 tokens, so divide token counts by 1000
-        pass
+        # Get pricing for the model
+        if model_name not in self.pricing:
+            # Use gpt-3.5-turbo pricing as fallback
+            pricing = self.pricing["gpt-3.5-turbo"]
+        else:
+            pricing = self.pricing[model_name]
+
+        # Calculate cost: (tokens / 1000) * price per 1K tokens
+        input_cost = (input_tokens / 1000) * pricing["input"]
+        output_cost = (output_tokens / 1000) * pricing["output"]
+
+        return input_cost + output_cost
 
     def optimize_conversation_history(
         self,
@@ -129,10 +135,6 @@ class MessageTokenizer:
         """
         Optimize conversation history to fit within token limit.
 
-        When conversations get long, they can exceed model context limits or
-        become expensive. This function keeps the most recent messages while
-        staying under the token limit.
-
         Args:
             messages: Full conversation history
             max_tokens: Maximum tokens allowed
@@ -141,19 +143,43 @@ class MessageTokenizer:
         Returns:
             Optimized message list within token limit
         """
-        # TODO: Implement conversation history optimization
-        # Strategy: Keep recent messages, drop older ones
+        if not messages:
+            return []
 
-        # 1. If keep_system_prompt and first message is system, save it separately
-        # 2. Start with empty optimized list
-        # 3. Work backwards through messages (most recent first)
-        # 4. Keep adding messages while total tokens < max_tokens
-        # 5. Reverse the list to restore chronological order
-        # 6. Add system prompt back at the beginning if needed
+        # Handle system prompt
+        system_message = None
+        conversation_messages = messages
 
-        # Hint: Use count_message_tokens() to check total size
-        # Hint: Work backwards with messages[::-1] or reversed()
-        pass
+        if keep_system_prompt and messages[0].get("role") == "system":
+            system_message = messages[0]
+            conversation_messages = messages[1:]
+
+        # Start with empty optimized list
+        optimized = []
+        current_tokens = 0
+
+        # If keeping system prompt, count its tokens
+        if system_message:
+            current_tokens = self.count_message_tokens([system_message])
+
+        # Work backwards through messages (keep most recent)
+        for message in reversed(conversation_messages):
+            # Count tokens for this message (with overhead)
+            message_tokens = self.count_message_tokens([message])
+
+            # Check if adding this message would exceed limit
+            if current_tokens + message_tokens <= max_tokens:
+                optimized.insert(0, message)  # Add to beginning
+                current_tokens += message_tokens
+            else:
+                # Can't fit any more messages
+                break
+
+        # Add system prompt back at the beginning
+        if system_message:
+            optimized.insert(0, system_message)
+
+        return optimized
 
     def chunk_long_message(
         self,
@@ -164,10 +190,6 @@ class MessageTokenizer:
         """
         Split a long message into smaller chunks that fit within token limits.
 
-        Sometimes customers send very long messages (like detailed complaints
-        or product reviews). This function breaks them into manageable pieces
-        while maintaining some overlap for context.
-
         Args:
             text: The long text to split
             max_chunk_tokens: Maximum tokens per chunk
@@ -176,25 +198,43 @@ class MessageTokenizer:
         Returns:
             List of text chunks, each within token limit
         """
-        # TODO: Implement message chunking with overlap
+        if not text:
+            return []
 
-        # 1. Encode the entire text into tokens
-        # 2. Split tokens into chunks of max_chunk_tokens
-        # 3. Add overlap_tokens from previous chunk to each new chunk
-        # 4. Decode each chunk back to text
-        # 5. Return list of text chunks
+        # Encode the entire text into tokens
+        tokens = self.encoding.encode(text)
+        total_tokens = len(tokens)
 
-        # Hint: Use self.encoding.encode(text) to get tokens
-        # Hint: Use self.encoding.decode(token_list) to get text back
-        # Hint: tokens[i:i+max_chunk_tokens] to slice a chunk
-        pass
+        # If text fits in one chunk, return it as-is
+        if total_tokens <= max_chunk_tokens:
+            return [text]
+
+        chunks = []
+        start = 0
+
+        while start < total_tokens:
+            # Calculate end position for this chunk
+            end = min(start + max_chunk_tokens, total_tokens)
+
+            # Extract chunk tokens
+            chunk_tokens = tokens[start:end]
+
+            # Decode back to text
+            chunk_text = self.encoding.decode(chunk_tokens)
+            chunks.append(chunk_text)
+
+            # Move start position (with overlap)
+            # If this is not the last chunk, add overlap
+            if end < total_tokens:
+                start = end - overlap_tokens
+            else:
+                break
+
+        return chunks
 
     def analyze_message_cost(self, message: str, expected_response_tokens: int = 150) -> Dict:
         """
         Analyze a single message for token count and cost.
-
-        This helps you understand the cost impact of different message lengths
-        and provides useful information for optimization decisions.
 
         Args:
             message: The customer message to analyze
@@ -203,20 +243,31 @@ class MessageTokenizer:
         Returns:
             Dictionary with analysis: tokens, cost, recommendations
         """
-        # TODO: Perform comprehensive message analysis
+        # Count tokens in the message
+        input_tokens = self.count_tokens(message)
 
-        # 1. Count tokens in the message
-        # 2. Estimate cost (message tokens + expected response tokens)
-        # 3. Determine if message is "short" (<50), "medium" (50-200), or "long" (>200)
-        # 4. Provide recommendations based on length
+        # Estimate cost
+        estimated_cost = self.estimate_cost(input_tokens, expected_response_tokens)
 
-        # Return a dict with keys:
-        # - "input_tokens": int
-        # - "expected_output_tokens": int
-        # - "estimated_cost": float
-        # - "message_length": str (short/medium/long)
-        # - "recommendation": str (advice on handling this message)
-        pass
+        # Categorize message length
+        if input_tokens < 50:
+            length_category = "short"
+            recommendation = "Optimal message length. Low cost per interaction."
+        elif input_tokens < 200:
+            length_category = "medium"
+            recommendation = "Good message length. Consider if all details are necessary."
+        else:
+            length_category = "long"
+            recommendation = "Long message. Consider chunking or summarizing for cost optimization."
+
+        return {
+            "input_tokens": input_tokens,
+            "expected_output_tokens": expected_response_tokens,
+            "estimated_cost": estimated_cost,
+            "message_length": length_category,
+            "recommendation": recommendation,
+            "cost_per_100_interactions": estimated_cost * 100
+        }
 
 
 def demonstrate_token_counting():
@@ -242,18 +293,18 @@ def demonstrate_token_counting():
 
     print("\nAnalyzing different message lengths:\n")
 
-    # TODO: Uncomment and complete this section
-    # for i, msg in enumerate(messages, 1):
-    #     token_count = tokenizer.count_tokens(msg)
-    #     char_count = len(msg)
-    #     print(f"Message {i}:")
-    #     print(f"  Characters: {char_count}")
-    #     print(f"  Tokens: {token_count}")
-    #     print(f"  Ratio: {char_count/token_count:.2f} chars per token")
-    #     print(f"  Preview: {msg[:60]}...")
-    #     print()
+    for i, msg in enumerate(messages, 1):
+        token_count = tokenizer.count_tokens(msg)
+        char_count = len(msg)
+        print(f"Message {i}:")
+        print(f"  Characters: {char_count}")
+        print(f"  Tokens: {token_count}")
+        print(f"  Ratio: {char_count/token_count:.2f} chars per token")
+        print(f"  Preview: {msg[:60]}...")
+        print()
 
-    print("Notice: Shorter messages have fewer tokens, but the char/token ratio varies!")
+    print("Key insight: On average, 1 token ≈ 4 characters in English.")
+    print("Shorter messages have fewer tokens, but the char/token ratio varies!")
 
 
 def demonstrate_cost_estimation():
@@ -287,26 +338,28 @@ def demonstrate_cost_estimation():
 
     print("\nComparing costs for different scenarios:\n")
 
-    # TODO: Uncomment and complete this section
-    # for scenario in scenarios:
-    #     cost_35 = tokenizer.estimate_cost(
-    #         scenario["input_tokens"],
-    #         scenario["output_tokens"],
-    #         "gpt-3.5-turbo"
-    #     )
-    #     cost_4 = tokenizer.estimate_cost(
-    #         scenario["input_tokens"],
-    #         scenario["output_tokens"],
-    #         "gpt-4"
-    #     )
-    #
-    #     print(f"{scenario['name']}:")
-    #     print(f"  Input tokens: {scenario['input_tokens']}")
-    #     print(f"  Output tokens: {scenario['output_tokens']}")
-    #     print(f"  GPT-3.5-turbo cost: ${cost_35:.6f}")
-    #     print(f"  GPT-4 cost: ${cost_4:.6f}")
-    #     print(f"  GPT-4 is {cost_4/cost_35:.1f}x more expensive")
-    #     print()
+    for scenario in scenarios:
+        cost_35 = tokenizer.estimate_cost(
+            scenario["input_tokens"],
+            scenario["output_tokens"],
+            "gpt-3.5-turbo"
+        )
+        cost_4 = tokenizer.estimate_cost(
+            scenario["input_tokens"],
+            scenario["output_tokens"],
+            "gpt-4"
+        )
+
+        print(f"{scenario['name']}:")
+        print(f"  Input tokens: {scenario['input_tokens']}")
+        print(f"  Output tokens: {scenario['output_tokens']}")
+        print(f"  GPT-3.5-turbo cost: ${cost_35:.6f}")
+        print(f"  GPT-4 cost: ${cost_4:.6f}")
+        print(f"  GPT-4 is {cost_4/cost_35:.1f}x more expensive")
+        print(f"  Cost per 1000 interactions (GPT-3.5): ${cost_35 * 1000:.2f}")
+        print()
+
+    print("Key insight: Model choice significantly impacts costs at scale!")
 
 
 def demonstrate_history_optimization():
@@ -333,20 +386,22 @@ def demonstrate_history_optimization():
         {"role": "user", "content": "123 New Street, New City, NC 12345"},
     ]
 
-    # TODO: Uncomment and complete this section
-    # original_tokens = tokenizer.count_message_tokens(conversation)
-    # print(f"\nOriginal conversation: {len(conversation)} messages, {original_tokens} tokens")
+    original_tokens = tokenizer.count_message_tokens(conversation)
+    print(f"\nOriginal conversation: {len(conversation)} messages, {original_tokens} tokens")
 
     # Optimize for different limits
-    # limits = [200, 150, 100]
-    #
-    # for limit in limits:
-    #     optimized = tokenizer.optimize_conversation_history(conversation, limit)
-    #     optimized_tokens = tokenizer.count_message_tokens(optimized)
-    #     print(f"\nOptimized for {limit} tokens:")
-    #     print(f"  Messages kept: {len(optimized)}")
-    #     print(f"  Actual tokens: {optimized_tokens}")
-    #     print(f"  Messages removed: {len(conversation) - len(optimized)}")
+    limits = [200, 150, 100]
+
+    for limit in limits:
+        optimized = tokenizer.optimize_conversation_history(conversation, limit)
+        optimized_tokens = tokenizer.count_message_tokens(optimized)
+        print(f"\nOptimized for {limit} tokens:")
+        print(f"  Messages kept: {len(optimized)}")
+        print(f"  Actual tokens: {optimized_tokens}")
+        print(f"  Messages removed: {len(conversation) - len(optimized)}")
+        print(f"  System prompt kept: {optimized[0]['role'] == 'system' if optimized else False}")
+
+    print("\nKey insight: Keep recent context while respecting token limits.")
 
 
 def demonstrate_message_chunking():
@@ -379,18 +434,60 @@ def demonstrate_message_chunking():
     a full refund including shipping costs, or I will be forced to dispute the charge with my credit
     card company and report this to the Better Business Bureau."""
 
-    # TODO: Uncomment and complete this section
-    # print(f"\nOriginal message length: {len(long_complaint)} characters")
-    # print(f"Original message tokens: {tokenizer.count_tokens(long_complaint)}")
-    #
-    # # Chunk into smaller pieces
-    # chunks = tokenizer.chunk_long_message(long_complaint, max_chunk_tokens=100, overlap_tokens=20)
-    #
-    # print(f"\nSplit into {len(chunks)} chunks:")
-    # for i, chunk in enumerate(chunks, 1):
-    #     chunk_tokens = tokenizer.count_tokens(chunk)
-    #     print(f"\nChunk {i}: {chunk_tokens} tokens")
-    #     print(f"Preview: {chunk[:100]}...")
+    print(f"\nOriginal message:")
+    print(f"  Characters: {len(long_complaint)}")
+    print(f"  Tokens: {tokenizer.count_tokens(long_complaint)}")
+
+    # Chunk into smaller pieces
+    chunks = tokenizer.chunk_long_message(long_complaint, max_chunk_tokens=100, overlap_tokens=20)
+
+    print(f"\nSplit into {len(chunks)} chunks (max 100 tokens, 20 token overlap):")
+
+    for i, chunk in enumerate(chunks, 1):
+        chunk_tokens = tokenizer.count_tokens(chunk)
+        print(f"\nChunk {i}: {chunk_tokens} tokens")
+        print(f"  Preview: {chunk[:80]}...")
+
+        # Show overlap detection
+        if i > 1:
+            # Check if this chunk starts with similar content to previous chunk's end
+            print(f"  (Contains overlap from previous chunk for context)")
+
+    print("\nKey insight: Chunking with overlap preserves context across segments.")
+
+
+def demonstrate_complete_analysis():
+    """
+    Demonstrate complete message analysis.
+    """
+    print("\n" + "="*70)
+    print("DEMO 5: Complete Message Cost Analysis")
+    print("="*70)
+
+    tokenizer = MessageTokenizer()
+
+    test_messages = [
+        "Order status?",
+        "I received the wrong item in my order. Can you help me return it and get the correct one?",
+        """I've been a loyal customer for 5 years, but my recent experience has been terrible.
+        I ordered 3 items, only 1 arrived, it was the wrong color, and customer service has been
+        unhelpful. I've called 4 times, been transferred to different departments, and still no
+        resolution. I'm considering taking my business elsewhere if this isn't resolved immediately."""
+    ]
+
+    print("\nAnalyzing message costs:\n")
+
+    for i, msg in enumerate(test_messages, 1):
+        analysis = tokenizer.analyze_message_cost(msg)
+
+        print(f"Message {i}: {msg[:50]}...")
+        print(f"  Input tokens: {analysis['input_tokens']}")
+        print(f"  Expected output tokens: {analysis['expected_output_tokens']}")
+        print(f"  Length category: {analysis['message_length']}")
+        print(f"  Cost per interaction: ${analysis['estimated_cost']:.6f}")
+        print(f"  Cost per 100 interactions: ${analysis['cost_per_100_interactions']:.4f}")
+        print(f"  Recommendation: {analysis['recommendation']}")
+        print()
 
 
 def main():
@@ -407,6 +504,7 @@ def main():
     print("2. Estimate API costs for different scenarios")
     print("3. Optimize conversation history to reduce costs")
     print("4. Handle long customer messages by chunking")
+    print("5. Perform complete cost analysis")
 
     # Check if OpenAI API key is available (optional for this demo)
     api_key = os.getenv("OPENAI_API_KEY")
@@ -414,20 +512,38 @@ def main():
         print("\nNote: OPENAI_API_KEY not set. This demo focuses on tokenization")
         print("and doesn't require API calls, but you'll need it for real usage.")
 
-    # Run demonstrations
-    # TODO: Uncomment these as you implement the functions
-    # demonstrate_token_counting()
-    # demonstrate_cost_estimation()
-    # demonstrate_history_optimization()
-    # demonstrate_message_chunking()
+    # Run all demonstrations
+    demonstrate_token_counting()
+    demonstrate_cost_estimation()
+    demonstrate_history_optimization()
+    demonstrate_message_chunking()
+    demonstrate_complete_analysis()
 
     print("\n" + "="*70)
-    print("Key Takeaways:")
-    print("- Tokens are the basic unit of LLM processing (roughly 4 chars = 1 token)")
-    print("- API costs scale with token count, so optimization matters")
-    print("- Keep conversation history concise to reduce costs")
-    print("- Long messages can be chunked for better processing")
-    print("- GPT-4 is much more expensive than GPT-3.5-turbo per token")
+    print("KEY TAKEAWAYS")
+    print("="*70)
+    print("\n1. Token Basics:")
+    print("   - 1 token ≈ 4 characters in English")
+    print("   - Tokens are the billing unit for LLM APIs")
+    print("   - Different languages may have different token ratios")
+
+    print("\n2. Cost Optimization:")
+    print("   - GPT-3.5-turbo is much cheaper than GPT-4")
+    print("   - Conversation history adds up quickly")
+    print("   - Keep only necessary context to reduce costs")
+
+    print("\n3. Practical Strategies:")
+    print("   - Limit conversation history to recent messages")
+    print("   - Chunk long messages for better processing")
+    print("   - Choose the right model for the task")
+    print("   - Monitor token usage in production")
+
+    print("\n4. Customer Service Applications:")
+    print("   - Short inquiries are cheap to process")
+    print("   - Long conversations need history management")
+    print("   - Detailed complaints may need chunking")
+    print("   - Balance cost and quality for best experience")
+
     print("="*70 + "\n")
 
 

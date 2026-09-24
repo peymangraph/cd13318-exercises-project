@@ -1,256 +1,164 @@
-# Model Selection Exercise - Starter Guide
+# Model Selection Exercise - Solution
 
 ## Purpose of this Folder
 
-This folder contains the starter code and instructions for the Model Selection exercise. You'll learn how to compare different Large Language Model (LLM) configurations for specific use cases by completing the `model_selection.py` template.
+This folder contains the complete solution to the model selection exercise, demonstrating how to compare different LLM configurations for specific use cases. The solution includes comprehensive code examples, evaluation metrics, and best practices for choosing the right model configuration for different types of tasks.
 
-## Learning Objectives
+## Solution Overview
 
-By completing this exercise, you will:
+The `model_selection.py` script demonstrates a systematic approach to comparing Large Language Models (LLMs) across different task types. This solution teaches students how to:
 
-1. **Understand Model Configuration**: Learn how different parameters (model choice, temperature, tokens) affect LLM behavior
-2. **Design Effective Prompts**: Create test prompts that evaluate specific capabilities (reasoning vs. creativity)
-3. **Implement API Integration**: Work with the OpenAI API to make model calls and handle responses
-4. **Build Evaluation Systems**: Understand how to objectively measure subjective model outputs
-5. **Compare Model Performance**: Analyze trade-offs between different model configurations
+- Configure models for specific use cases (reasoning vs. generation)
+- Implement quantitative evaluation metrics
+- Compare model performance across multiple dimensions
+- Make data-driven decisions about model selection
 
-## Exercise Overview
+## Key Learning Objectives
 
-You'll complete a Python script that:
-- Configures two different model setups (reasoning-optimized vs. generation-optimized)
-- Tests both configurations on reasoning tasks (math, logic, calculations)
-- Tests both configurations on creative tasks (storytelling, marketing, dialogue)
-- Scores and compares the results across multiple dimensions
+By studying this solution, students will understand:
 
-## Getting Started
+1. **Model Configuration Strategy**: How different parameters (temperature, model choice) affect performance
+2. **Task-Specific Optimization**: Why certain configurations work better for reasoning vs. creative tasks
+3. **Evaluation Methodology**: How to create objective scoring systems for subjective outputs
+4. **Performance Metrics**: Measuring latency, token usage, and quality scores
+5. **Comparative Analysis**: Systematic approaches to model comparison
+
+## Solution Components
+
+### 1. Model Configurations (`MODEL_CONFIGS`)
+
+The solution defines two distinct configurations:
+
+- **Reasoning Optimized**: Uses o4-mini with lower temperature for consistent, logical outputs
+- **Generation Optimized**: Uses gpt-4o with higher temperature for creative, varied responses
+
+### 2. Test Prompts
+
+**Reasoning Prompts** (`REASONING_PROMPTS`):
+- Math word problems requiring arithmetic
+- Logical deduction tasks
+- Multi-step business calculations
+
+**Generation Prompts** (`GENERATION_PROMPTS`):
+- Creative storytelling
+- Marketing copy creation
+- Character dialogue writing
+
+### 3. Evaluation Functions
+
+**`score_reasoning_accuracy()`**: 
+- Evaluates logical correctness on a 1-5 scale
+- Task-specific scoring criteria
+- Checks for both correct answers and proper reasoning
+
+**`score_creativity()`**:
+- Assesses creative quality and vocabulary richness
+- Task-specific element detection
+- Vocabulary diversity analysis
+
+### 4. Testing Framework
+
+**`test_reasoning_task()`** and **`test_generation_task()`**:
+- Systematic comparison across model configurations
+- Performance metric collection (latency, tokens)
+- Formatted output for easy analysis
+
+## How to Use This Solution
 
 ### Prerequisites
 
-1. **Python Environment**: Ensure you have Python 3.8+ installed
-2. **Required Libraries**: Install the necessary packages:
-   ```bash
-   pip install openai pandas matplotlib seaborn numpy
-   ```
-3. **OpenAI API Key**: You'll need an OpenAI API key with credits
-   - Sign up at [OpenAI Platform](https://platform.openai.com/)
-   - Generate an API key from your dashboard
-   - **Important**: Keep your API key secure and never commit it to version control
-
-### File Structure
-
-```
-starter/
-├── README.md (this file)
-└── model_selection.py (template to complete)
+1. Install required dependencies:
+```bash
+pip install openai pandas matplotlib seaborn numpy
 ```
 
-## Step-by-Step Instructions
+2. Set up your OpenAI API key:
+   - Replace the hardcoded API key with your own
+   - For production use, store API keys in environment variables
 
-### Step 1: Complete the Imports
-Add the missing import statements at the top of `model_selection.py`:
+### Running the Solution
+
+1. **Basic Execution**:
 ```python
-import pandas as pd
-import time
-import json
-from typing import Dict, List, Tuple
-import matplotlib.pyplot as plt
-import seaborn as sns
-from datetime import datetime
-import numpy as np
+python model_selection.py
 ```
 
-### Step 2: Configure Model Settings
-Fill in the `MODEL_CONFIGS` dictionary with appropriate values:
-
-**For reasoning_optimized:**
-- Model: Choose an o-series model (e.g., "o1-mini" or "o1-preview")
-- Temperature: Use a lower value (0.1-0.3) for consistent outputs
-- Max tokens: Set to 500-1000 for detailed reasoning
-
-**For generation_optimized:**
-- Model: Choose a creative model (e.g., "gpt-4o" or "gpt-4-turbo")
-- Temperature: Use a higher value (0.7-1.0) for creative variation
-- Max tokens: Set to 500-1000 for longer creative responses
-- Top_p: Add nucleus sampling (0.9-0.95)
-
-### Step 3: Design Test Prompts
-
-**REASONING_PROMPTS** - Create three test cases:
-
-1. **Math Word Problem**: 
-   - Create a simple arithmetic problem with context
-   - Example: "Sarah has X items, gives away Y, buys Z more. How many does she have?"
-   - Provide the correct numerical answer
-
-2. **Logical Deduction**:
-   - Create an if-then logical sequence
-   - Example: "If all A are B, and C is A, what can we conclude about C?"
-   - Provide the logical conclusion
-
-3. **Business Calculation**:
-   - Create a multi-step percentage problem
-   - Example: Revenue changes over multiple quarters
-   - Provide the calculated result
-
-**GENERATION_PROMPTS** - Create three creative tasks:
-
-1. **Creative Storytelling**: Write a prompt for imaginative narrative
-2. **Marketing Copy**: Request persuasive product description
-3. **Creative Dialogue**: Ask for character-based conversation
-
-### Step 4: Implement API Integration
-Complete the `call_openai_api()` function:
-
-1. **Timing**: Record start and end times for latency measurement
-2. **Client Setup**: Initialize OpenAI client with your API key
-3. **API Call**: Use `client.chat.completions.create()` with proper parameters
-4. **Response Handling**: Extract content and usage metrics
-5. **Error Handling**: Gracefully handle API failures
-
-**Key Implementation Points:**
+2. **Test Specific Tasks**:
 ```python
-# Timing
-start_time = time.time()
+# Test different reasoning tasks
+reasoning_results_1 = test_reasoning_task(0)  # Math problem
+reasoning_results_2 = test_reasoning_task(1)  # Logic deduction
+reasoning_results_3 = test_reasoning_task(2)  # Business calculation
 
-# API Call
-response = client.chat.completions.create(
-    model=config["model"],
-    messages=[{"role": "user", "content": prompt}],
-    temperature=config["temperature"],
-    max_completion_tokens=config["max_tokens"]
-)
-
-# Calculate latency
-end_time = time.time()
-latency = (end_time - start_time) * 1000  # Convert to milliseconds
+# Test different generation tasks
+generation_results_1 = test_generation_task(0)  # Creative story
+generation_results_2 = test_generation_task(1)  # Marketing copy
+generation_results_3 = test_generation_task(2)  # Dialogue
 ```
 
-### Step 5: Test Your Implementation
+### Expected Output
 
-1. **Add Your API Key**: Replace `"YOUR_API_KEY_HERE"` with your actual OpenAI API key
-2. **Start Small**: Test with one task first
-3. **Uncomment Test Code**: Enable the example usage at the bottom
-4. **Run and Debug**: Execute the script and fix any issues
+The solution provides detailed output including:
+- Model configuration details
+- API response content
+- Performance metrics (latency, token usage)
+- Quality scores (accuracy for reasoning, creativity for generation)
+- Comparative analysis between configurations
 
-## Expected Behavior
+## Key Insights from the Solution
 
-When working correctly, your script should:
+### 1. Temperature Impact
+- **Lower temperature (1.0)**: More consistent, focused responses ideal for reasoning
+- **Higher temperature (1.0)**: More creative variation suitable for generation tasks
 
-1. **Display Configuration**: Show which model and parameters are being tested
-2. **Make API Calls**: Successfully call OpenAI with your prompts
-3. **Show Responses**: Display the model's actual responses
-4. **Calculate Scores**: Show accuracy scores for reasoning tasks and creativity scores for generation tasks
-5. **Report Metrics**: Display latency and token usage for each call
-6. **Compare Results**: Allow you to see how different configurations perform
+### 2. Model Selection
+- **O-series models**: Excel at step-by-step reasoning and logical tasks
+- **GPT-4o**: Provides excellent creative capabilities and varied outputs
 
-## Sample Output
+### 3. Evaluation Challenges
+- Reasoning tasks can be objectively scored against expected answers
+- Creative tasks require more nuanced evaluation criteria
+- Vocabulary richness serves as a proxy for creative quality
 
-```
-🧠 TESTING REASONING TASK: math_word_problem
-Description: Simple arithmetic word problem
-Expected Answer: 6 apples
-============================================================
+### 4. Performance Trade-offs
+- More capable models may have higher latency
+- Token usage varies significantly between tasks and models
+- Quality improvements may come at computational cost
 
-🤖 Testing reasoning_optimized:
-   Model: o1-mini | Temp: 0.2
-  🔄 Calling o1-mini (temp: 0.2)...
-  ✅ Success! Latency: 1250.5ms, Tokens: 45
+## Extension Opportunities
 
-📝 RESPONSE:
-----------------------------------------
-Sarah starts with 5 apples, gives 2 to Tom (5-2=3), 
-then buys 3 more (3+3=6). Sarah has 6 apples.
-----------------------------------------
-✅ Accuracy Score: 5/5
-⏱️  Latency: 1250.5ms
-🔢 Tokens: 45
-```
+Students can extend this solution by:
+
+1. **Adding More Models**: Test additional model configurations (different temperatures, models)
+2. **Expanding Evaluation**: Implement more sophisticated scoring algorithms
+3. **Task Variety**: Add new task types (code generation, translation, summarization)
+4. **Statistical Analysis**: Add confidence intervals and significance testing
+5. **Visualization**: Create charts comparing model performance across dimensions
+6. **Cost Analysis**: Include API cost calculations in the comparison
+
+## Best Practices Demonstrated
+
+1. **Structured Configuration**: Using dictionaries to manage model settings
+2. **Error Handling**: Graceful handling of API failures
+3. **Modular Design**: Separate functions for different concerns
+4. **Comprehensive Logging**: Detailed output for debugging and analysis
+5. **Quantitative Evaluation**: Objective scoring methods for subjective tasks
+6. **Documentation**: Extensive comments explaining the reasoning behind design decisions
+
+## Security Considerations
+
+- **API Key Management**: Never commit API keys to version control
+- **Rate Limiting**: Be mindful of API rate limits when scaling tests
+- **Cost Monitoring**: Track API usage to avoid unexpected charges
+- **Data Privacy**: Ensure test prompts don't contain sensitive information
 
 ## Troubleshooting
 
-### Common Issues and Solutions:
+Common issues and solutions:
 
-1. **API Key Errors**:
-   - Verify your API key is correct
-   - Check that you have sufficient credits
-   - Ensure the key has proper permissions
+1. **API Key Errors**: Verify your OpenAI API key is valid and has sufficient credits
+2. **Model Availability**: Some models may not be available in all regions
+3. **Rate Limiting**: Add delays between API calls if hitting rate limits
+4. **Token Limits**: Adjust max_tokens if responses are being truncated
 
-2. **Import Errors**:
-   - Install missing packages: `pip install package_name`
-   - Check Python version compatibility
-
-3. **Model Not Available**:
-   - Some models may not be available in all regions
-   - Try alternative models (gpt-4o, gpt-4-turbo, etc.)
-
-4. **Rate Limiting**:
-   - Add delays between API calls if needed
-   - Check your API usage limits
-
-5. **Empty Responses**:
-   - Verify your prompts are clear and specific
-   - Check that max_tokens is sufficient
-
-## Testing Strategy
-
-### Recommended Testing Order:
-
-1. **Test Imports**: Run the file to check all imports work
-2. **Test Configuration**: Print `MODEL_CONFIGS` to verify structure
-3. **Test One API Call**: Start with a simple prompt
-4. **Test Scoring**: Verify scoring functions work with sample responses
-5. **Test Full Workflow**: Run complete reasoning and generation tests
-
-### Validation Checklist:
-
-- [ ] All imports successful
-- [ ] MODEL_CONFIGS properly filled
-- [ ] All prompts have content and expected answers
-- [ ] API calls return successful responses
-- [ ] Scoring functions return reasonable scores (1-5)
-- [ ] Latency and token metrics are captured
-- [ ] Both reasoning and generation tests work
-
-## Extension Ideas
-
-Once you complete the basic exercise, try these enhancements:
-
-1. **Add More Models**: Test additional model configurations
-2. **Expand Test Cases**: Create more diverse prompts
-3. **Visualize Results**: Create charts comparing performance
-4. **Cost Analysis**: Calculate and display API costs
-5. **Batch Testing**: Run multiple iterations for statistical analysis
-6. **Custom Scoring**: Develop more sophisticated evaluation metrics
-
-## Key Concepts Reinforced
-
-This exercise teaches several important concepts:
-
-- **Model Selection**: Different models excel at different tasks
-- **Parameter Tuning**: Temperature and other settings significantly impact output
-- **Prompt Engineering**: Well-designed prompts are crucial for good results
-- **Evaluation Methodology**: Objective measurement of subjective outputs
-- **API Integration**: Proper error handling and metric collection
-- **Comparative Analysis**: Systematic approaches to model comparison
-
-## Getting Help
-
-If you encounter issues:
-
-1. **Check the Solution**: Compare with the complete solution in the `solution/` folder
-2. **Review Documentation**: Consult OpenAI API documentation
-3. **Debug Step by Step**: Use print statements to isolate issues
-4. **Test Components**: Verify each function works independently
-
-## Success Criteria
-
-You've successfully completed the exercise when:
-
-- [ ] Your script runs without errors
-- [ ] Both model configurations make successful API calls
-- [ ] Reasoning tasks show accuracy scores
-- [ ] Generation tasks show creativity scores
-- [ ] You can compare performance between configurations
-- [ ] You understand why different configurations perform differently on different tasks
-
-Remember: The goal is not just to make the code work, but to understand the principles of model selection and evaluation that will help you choose the right LLM configuration for your own projects!
+This solution provides a comprehensive foundation for understanding model selection principles and implementing systematic evaluation approaches in real-world applications.
