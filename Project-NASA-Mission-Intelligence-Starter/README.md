@@ -49,6 +49,91 @@ By completing this project, students will learn to:
    export OPENAI_API_KEY="your-api-key-here"
    ```
 
+### RAGAS 0.4.3 — VertexAI Import Compatibility Fix
+
+#### Issue
+
+```bash
+python -W ignore -c "import ragas; print('RAGAS:', ragas.__version__)"
+```
+
+RAGAS `0.4.3` imports `ChatVertexAI` and `VertexAI` from the older `langchain-community` package paths.
+
+With newer LangChain versions, these integrations are provided by `langchain-google-vertexai`, causing:
+
+```text
+ImportError: cannot import name 'ChatVertexAI'
+```
+
+#### Fix
+
+Update the imports in:
+
+```text
+/opt/venv/lib/python3.10/site-packages/ragas/llms/base.py
+```
+
+Replace:
+
+```python
+from langchain_community.chat_models.vertexai import ChatVertexAI
+from langchain_community.llms import VertexAI
+```
+
+with:
+
+```python
+from langchain_google_vertexai import ChatVertexAI
+from langchain_google_vertexai import VertexAI
+```
+
+Using `sed`:
+
+```bash
+sed -i 's/from langchain_community.chat_models.vertexai import ChatVertexAI/from langchain_google_vertexai import ChatVertexAI/' /opt/venv/lib/python3.10/site-packages/ragas/llms/base.py
+
+sed -i 's/from langchain_community.llms import VertexAI/from langchain_google_vertexai import VertexAI/' /opt/venv/lib/python3.10/site-packages/ragas/llms/base.py
+```
+
+#### Verification
+
+Verify that the imports were updated:
+
+```bash
+grep -n "VertexAI" /opt/venv/lib/python3.10/site-packages/ragas/llms/base.py
+```
+
+Expected:
+
+```text
+12:from langchain_google_vertexai import ChatVertexAI
+13:from langchain_google_vertexai import VertexAI
+43:    ChatVertexAI,
+44:    VertexAI,
+```
+
+Verify the VertexAI integration:
+
+```bash
+python -c "from langchain_google_vertexai import ChatVertexAI; print('Vertex import OK')"
+```
+
+Finally, verify RAGAS:
+
+```bash
+python -W ignore -c "import ragas; print('RAGAS:', ragas.__version__)"
+```
+
+Expected:
+
+```text
+RAGAS: 0.4.3
+```
+
+> **Note:** This modifies the installed RAGAS package under `/opt/venv`. The change may need to be reapplied if the virtual environment or RAGAS package is reinstalled or upgraded.
+
+![RAGAS package fix](fix_ragas.png)
+
 ## 📚 Learning Path
 
 This project follows a structured learning approach where each file contains TODO comments guiding you through the implementation. Complete the files in this recommended order:
