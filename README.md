@@ -25,11 +25,9 @@ This approach keeps the repository current with Udacity while maintaining a clea
 
 ## Current Project Status
 
-Active development is on:
+The completed coursework and NASA Mission Intelligence project are now on the repository's **`main`** branch.
 
-`final-project`
-
-The `main` branch is the synchronized Udacity baseline. The `final-project` branch contains the completed coursework exercises and NASA Mission Intelligence implementation.
+`main` is the canonical working/submission branch. The former `final-project` branch is no longer the primary branch.
 
 ### Completed
 
@@ -55,7 +53,7 @@ Complete these in order:
 3. **P0-03 — Run the Streamlit end-to-end smoke test**
 4. **P0-04 — Run the complete RAGAS batch evaluation and record metrics**
 5. **P0-05 — Review generated/cache artifacts before submission**
-6. **P0-06 — Perform the final submission audit and merge `final-project` into `main`**
+6. **P0-06 — Perform the final submission audit on `main`**
 
 The detailed completion checklist is maintained in **`TASKS.md`**.
 
@@ -164,11 +162,11 @@ git clone https://github.com/peymangraph/cd13318-exercises-project.git
 cd cd13318-exercises-project
 ```
 
-Switch to the active project branch:
+Use the canonical project branch:
 
 ```bash
-git checkout final-project
-git pull origin final-project
+git checkout main
+git pull origin main
 ```
 
 Open the NASA final project:
@@ -200,11 +198,7 @@ The upstream `fix_ragas.png` reference is retained in the NASA project directory
 
 ## Pull Request
 
-The current final-project work is tracked in:
-
-**PR #1 — Finalize NASA Mission Intelligence project and complete course exercises**
-
-The PR remains **Draft** and should not be merged until all runtime validation tasks are complete.
+The former `final-project` work has been promoted directly to `main`. PR #1 is no longer required for branch promotion. Runtime validation tasks remain tracked in `TASKS.md`.
 
 ## Attribution
 
