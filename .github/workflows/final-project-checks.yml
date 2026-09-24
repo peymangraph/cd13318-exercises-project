@@ -21,21 +21,31 @@ jobs:
       - name: Compile all Python files
         run: python -m compileall -q .
 
-      - name: Verify final-project files contain no TODO markers
+      - name: Verify exercises and final project
         run: |
           python - <<'PY'
+          import json
           from pathlib import Path
 
-          project = Path("Project-NASA-Mission-Intelligence-Starter")
           required = [
-              project / "embedding_pipeline.py",
-              project / "rag_client.py",
-              project / "llm_client.py",
-              project / "ragas_evaluator.py",
-              project / "chat.py",
-              project / "batch_evaluate.py",
-              project / "evaluation_dataset.txt",
+              Path("Applied Prompting and Inference/exercise-inference-parameters/starter/inference_parameters.py"),
+              Path("Applied Prompting and Inference/exercise-prompt-engineering/starter/prompt_engineering.py"),
+              Path("Implementing Chatbot with LLM/exercises/starter/customer_service_bot.py"),
+              Path("Implementing RAG with Vector Databases/exercises/starter/chromadb_rag_system.py"),
+              Path("Implementing Tokens Embeddings and Vector Search /exercise-embeddings/starter/review_embedding_system.py"),
+              Path("Implementing Tokens Embeddings and Vector Search /exercise_tokenization/starter/message_tokenizer.py"),
+              Path("RAG Evaluation Implementation/exercises/starter/ragas_rag_evaluation.py"),
+              Path("Strategic Model Selection & Economics /exercise-model-selection/starter/model_selection.py"),
+              Path("Strategic Model Selection & Economics /exercise-prompt-cost/starter/prompt_cost_evaluation.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/embedding_pipeline.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/rag_client.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/llm_client.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/ragas_evaluator.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/chat.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/batch_evaluate.py"),
+              Path("Project-NASA-Mission-Intelligence-Starter/evaluation_dataset.txt"),
           ]
+
           missing = [str(path) for path in required if not path.exists()]
           if missing:
               raise SystemExit(f"Missing required files: {missing}")
@@ -47,5 +57,18 @@ jobs:
           if todo_files:
               raise SystemExit(f"TODO markers remain in: {todo_files}")
 
-          print("Required final-project files are present and TODO-free.")
+          dataset = Path("Project-NASA-Mission-Intelligence-Starter/evaluation_dataset.txt")
+          cases = [
+              json.loads(line)
+              for line in dataset.read_text(encoding="utf-8").splitlines()
+              if line.strip() and not line.lstrip().startswith("#")
+          ]
+          required_categories = {"overview", "emergency", "disaster_analysis", "crew", "technical", "timeline"}
+          categories = {case.get("category") for case in cases}
+          if len(cases) < 5:
+              raise SystemExit("Evaluation dataset must contain at least five cases.")
+          if not required_categories.issubset(categories):
+              raise SystemExit(f"Missing evaluation categories: {sorted(required_categories - categories)}")
+
+          print("Exercises and final-project files are present, TODO-free, and evaluation data is valid.")
           PY
