@@ -18,7 +18,6 @@ except ImportError:
 
 st.set_page_config(
     page_title="NASA Mission Intelligence",
-    page_icon="🚀",
     layout="wide",
 )
 
@@ -52,7 +51,7 @@ def format_context(documents: List[str], metadatas: List[Dict]) -> str:
 
 
 def display_evaluation_metrics(scores: Dict):
-    st.sidebar.subheader("📊 Response Quality")
+    st.sidebar.subheader("Response Quality")
     if not scores:
         st.sidebar.info("No evaluation has been run yet.")
         return
@@ -92,7 +91,7 @@ def display_sources(result: Dict):
 
 
 def main():
-    st.title("🚀 NASA Mission Intelligence")
+    st.title("NASA Mission Intelligence")
     st.markdown(
         "Ask source-grounded questions about **Apollo 11**, **Apollo 13**, "
         "and **Challenger (STS-51L)**."
