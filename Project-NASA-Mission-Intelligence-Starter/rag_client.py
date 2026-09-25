@@ -1,6 +1,7 @@
 """ChromaDB retrieval utilities for the NASA Mission Intelligence project."""
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -66,6 +67,48 @@ def _embed_query(query: str, openai_key: str, embedding_model: str) -> List[floa
     return response.data[0].embedding
 
 
+STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "does",
+    "for", "from", "had", "has", "have", "how", "in", "is", "it", "of",
+    "on", "or", "that", "the", "their", "this", "to", "was", "were", "what",
+    "when", "where", "which", "who", "why", "with",
+}
+
+
+def _keyword_terms(text: str) -> List[str]:
+    """Extract meaningful lowercase query/document terms for lexical scoring."""
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if token not in STOP_WORDS and len(token) > 1
+    ]
+
+
+def _keyword_overlap_score(query: str, document: str) -> float:
+    """Score how strongly a document overlaps the query's important terms and phrases."""
+    query_terms = _keyword_terms(query)
+    if not query_terms:
+        return 0.0
+
+    document_terms = _keyword_terms(document)
+    if not document_terms:
+        return 0.0
+
+    query_set = set(query_terms)
+    document_set = set(document_terms)
+    unigram_score = len(query_set & document_set) / len(query_set)
+
+    query_bigrams = set(zip(query_terms, query_terms[1:]))
+    document_bigrams = set(zip(document_terms, document_terms[1:]))
+    bigram_score = (
+        len(query_bigrams & document_bigrams) / len(query_bigrams)
+        if query_bigrams
+        else 0.0
+    )
+
+    return (0.8 * unigram_score) + (0.2 * bigram_score)
+
+
 def _normalized_tokens(text: str) -> set[str]:
     """Normalize a chunk into tokens for exact and near-duplicate detection."""
     return set(" ".join(text.lower().split()).split())
@@ -98,7 +141,7 @@ def retrieve_documents(
     openai_key: Optional[str] = None,
     embedding_model: str = "text-embedding-3-small",
 ) -> Optional[Dict[str, Any]]:
-    """Retrieve top-k semantically similar chunks with optional mission filtering."""
+    """Retrieve and rerank chunks using semantic similarity plus keyword overlap."""
     if collection is None:
         raise ValueError("A ChromaDB collection is required.")
     if not query or not query.strip():
@@ -142,26 +185,50 @@ def retrieve_documents(
     metadatas = (raw.get("metadatas") or [[]])[0]
     distances = (raw.get("distances") or [[]])[0]
 
+    finite_distances = [
+        float(distance)
+        for distance in distances
+        if isinstance(distance, (int, float)) and distance != float("inf")
+    ]
+    min_distance = min(finite_distances) if finite_distances else 0.0
+    max_distance = max(finite_distances) if finite_distances else 0.0
+    distance_span = max_distance - min_distance
+
     ranked = []
     for idx, document in enumerate(documents):
         if not document:
             continue
+
         metadata = metadatas[idx] if idx < len(metadatas) and metadatas[idx] else {}
         distance = distances[idx] if idx < len(distances) else float("inf")
         doc_id = ids[idx] if idx < len(ids) else f"result-{idx}"
-        ranked.append((distance, doc_id, document, metadata))
 
-    ranked.sort(key=lambda item: item[0])
+        if isinstance(distance, (int, float)) and distance != float("inf"):
+            semantic_score = (
+                1.0
+                if distance_span == 0
+                else 1.0 - ((float(distance) - min_distance) / distance_span)
+            )
+        else:
+            semantic_score = 0.0
 
-    # Chroma distances are sorted strongest-first above. Walk that ranking and
-    # keep only distinct chunks so the final context contains the best available
-    # evidence rather than several nearly identical overlapping windows.
+        keyword_score = _keyword_overlap_score(query, document)
+
+        # Semantic similarity remains the primary signal while lexical overlap
+        # promotes chunks that explicitly contain important query terms/phrases.
+        hybrid_score = (0.7 * semantic_score) + (0.3 * keyword_score)
+        ranked.append((hybrid_score, distance, doc_id, document, metadata))
+
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+
+    # Walk the hybrid ranking and keep only distinct chunks so the final context
+    # contains the strongest diverse evidence instead of overlapping windows.
     unique = []
     selected_documents: List[str] = []
     seen_exact = set()
 
     for item in ranked:
-        document = item[2]
+        document = item[3]
         normalized = " ".join(document.lower().split())
         if normalized in seen_exact:
             continue
@@ -176,10 +243,10 @@ def retrieve_documents(
             break
 
     return {
-        "ids": [[item[1] for item in unique]],
-        "documents": [[item[2] for item in unique]],
-        "metadatas": [[item[3] for item in unique]],
-        "distances": [[item[0] for item in unique]],
+        "ids": [[item[2] for item in unique]],
+        "documents": [[item[3] for item in unique]],
+        "metadatas": [[item[4] for item in unique]],
+        "distances": [[item[1] for item in unique]],
     }
 
 
