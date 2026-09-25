@@ -47,7 +47,10 @@ class ChromaEmbeddingPipelineTextOnly:
         self.chunk_overlap = chunk_overlap
         self.chroma_persist_directory = chroma_persist_directory
         self.collection_name = collection_name
-        self.openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+        base_url = "https://openai.vocareum.com/v1" if openai_api_key and openai_api_key.startswith("voc") else None
+        self.openai_client = (
+            OpenAI(api_key=openai_api_key, base_url=base_url) if openai_api_key else None
+        )
 
         Path(chroma_persist_directory).mkdir(parents=True, exist_ok=True)
         self.chroma_client = chromadb.PersistentClient(path=chroma_persist_directory)
