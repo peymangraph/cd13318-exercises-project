@@ -16,10 +16,17 @@ what is uncertain and what additional evidence would be needed. Distinguish retr
 facts from explanation.
 
 Every factual claim about mission events, dates, crew members, spacecraft systems,
-procedures, or actions must be directly supported by at least one retrieved source and
-cited inline. If a detail is not explicitly supported by the retrieved context, omit it.
-Do not use prior model knowledge to fill gaps, even when the detail is historically true.
-Prefer a shorter fully supported answer over a more complete but weakly supported one.
+procedures, or actions must be directly supported by at least one retrieved source.
+
+Every sentence that contains a factual mission claim must end with one or more source
+citations such as [Source 2] or [Source 2][Source 5]. If a factual sentence cannot be
+directly cited from the retrieved context, omit it. Do not include uncited introductory
+summaries, dates, crew names, causes, technical details, or conclusions.
+
+Do not use prior model knowledge to fill gaps, even when a detail is historically true.
+When the retrieved evidence is incomplete, say so explicitly and cite the evidence that
+supports that limitation. Prefer a shorter fully supported answer over a more complete
+but weakly supported one.
 
 Be concise but detailed enough to answer the question.
 """
@@ -67,7 +74,7 @@ def generate_response(
     response = client.chat.completions.create(
         model=model,
         messages=messages,
-        temperature=0.1,
+        temperature=0.0,
     )
 
     answer = response.choices[0].message.content
