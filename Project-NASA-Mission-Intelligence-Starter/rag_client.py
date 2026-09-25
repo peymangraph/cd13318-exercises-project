@@ -3,6 +3,7 @@
 import math
 import os
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -85,73 +86,82 @@ def _keyword_terms(text: str) -> List[str]:
     ]
 
 
-def _build_term_weights(query: str, documents: List[str]) -> Dict[str, float]:
-    """Build lightweight IDF-style weights for the query terms across the active corpus."""
-    query_terms = set(_keyword_terms(query))
-    if not query_terms:
-        return {}
+def _bm25_scores(
+    query: str,
+    documents: List[str],
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> List[float]:
+    """Return BM25-style lexical relevance scores for every document."""
+    query_terms = list(dict.fromkeys(_keyword_terms(query)))
+    if not query_terms or not documents:
+        return [0.0] * len(documents)
 
-    document_count = max(len(documents), 1)
+    tokenized_documents = [_keyword_terms(document or "") for document in documents]
+    document_lengths = [len(tokens) for tokens in tokenized_documents]
+    average_length = (
+        sum(document_lengths) / len(document_lengths)
+        if document_lengths
+        else 0.0
+    )
+    if average_length <= 0:
+        return [0.0] * len(documents)
+
     document_frequency = {term: 0 for term in query_terms}
+    term_frequencies = []
 
-    for document in documents:
-        document_terms = set(_keyword_terms(document))
-        for term in query_terms & document_terms:
-            document_frequency[term] += 1
+    for tokens in tokenized_documents:
+        frequencies = Counter(tokens)
+        term_frequencies.append(frequencies)
+        for term in query_terms:
+            if frequencies.get(term, 0) > 0:
+                document_frequency[term] += 1
 
-    return {
-        term: 1.0 + math.log((document_count + 1) / (document_frequency[term] + 1))
+    document_count = len(documents)
+    idf = {
+        term: math.log(
+            1.0
+            + (
+                (document_count - document_frequency[term] + 0.5)
+                / (document_frequency[term] + 0.5)
+            )
+        )
         for term in query_terms
     }
 
+    scores: List[float] = []
+    for frequencies, document_length in zip(term_frequencies, document_lengths):
+        score = 0.0
+        length_normalization = k1 * (
+            1.0 - b + b * (document_length / average_length)
+        )
 
-def _keyword_overlap_score(
-    query: str,
-    document: str,
-    term_weights: Optional[Dict[str, float]] = None,
+        for term in query_terms:
+            term_frequency = frequencies.get(term, 0)
+            if term_frequency <= 0:
+                continue
+            score += idf[term] * (
+                (term_frequency * (k1 + 1.0))
+                / (term_frequency + length_normalization)
+            )
+
+        scores.append(score)
+
+    return scores
+
+
+def _rrf_score(
+    semantic_rank: Optional[int],
+    lexical_rank: Optional[int],
+    rrf_k: int = 60,
 ) -> float:
-    """Score weighted keyword and phrase overlap between a query and document."""
-    query_terms = _keyword_terms(query)
-    if not query_terms:
-        return 0.0
-
-    document_terms = _keyword_terms(document)
-    if not document_terms:
-        return 0.0
-
-    query_set = set(query_terms)
-    document_set = set(document_terms)
-    weights = term_weights or {term: 1.0 for term in query_set}
-
-    total_weight = sum(weights.get(term, 1.0) for term in query_set)
-    matched_weight = sum(
-        weights.get(term, 1.0)
-        for term in query_set
-        if term in document_set
-    )
-    unigram_score = matched_weight / total_weight if total_weight else 0.0
-
-    query_bigrams = set(zip(query_terms, query_terms[1:]))
-    document_bigrams = set(zip(document_terms, document_terms[1:]))
-    bigram_score = (
-        len(query_bigrams & document_bigrams) / len(query_bigrams)
-        if query_bigrams
-        else 0.0
-    )
-
-    return (0.85 * unigram_score) + (0.15 * bigram_score)
-
-
-def _cosine_similarity(left: List[float], right: List[float]) -> float:
-    """Return cosine similarity for two embedding vectors."""
-    if not left or not right or len(left) != len(right):
-        return 0.0
-
-    dot = sum(a * b for a, b in zip(left, right))
-    left_norm = math.sqrt(sum(a * a for a in left))
-    right_norm = math.sqrt(sum(b * b for b in right))
-    denominator = left_norm * right_norm
-    return dot / denominator if denominator else 0.0
+    """Fuse semantic and lexical ranks using reciprocal-rank fusion."""
+    score = 0.0
+    if semantic_rank is not None:
+        score += 1.0 / (rrf_k + semantic_rank)
+    if lexical_rank is not None:
+        score += 1.0 / (rrf_k + lexical_rank)
+    return score
 
 
 def _normalized_tokens(text: str) -> set[str]:
@@ -186,7 +196,7 @@ def retrieve_documents(
     openai_key: Optional[str] = None,
     embedding_model: str = "text-embedding-3-small",
 ) -> Optional[Dict[str, Any]]:
-    """Merge semantic and full-corpus keyword candidates, then hybrid-rerank them."""
+    """Fuse semantic and BM25 lexical rankings, then deduplicate the final top-k."""
     if collection is None:
         raise ValueError("A ChromaDB collection is required.")
     if not query or not query.strip():
@@ -213,7 +223,8 @@ def retrieve_documents(
     if collection_size == 0:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-    semantic_candidate_count = min(collection_size, max(n_results * 10, 50))
+    # Semantic ranking from ChromaDB.
+    semantic_candidate_count = min(collection_size, max(n_results * 15, 100))
     semantic_kwargs = {
         "query_embeddings": [query_embedding],
         "n_results": semantic_candidate_count,
@@ -228,6 +239,8 @@ def retrieve_documents(
     semantic_metadatas = (semantic_raw.get("metadatas") or [[]])[0]
     semantic_distances = (semantic_raw.get("distances") or [[]])[0]
 
+    # Lexical ranking scans every chunk in the selected mission/corpus so rare
+    # incident terms can surface even when semantic retrieval misses them.
     corpus_kwargs = {"include": ["documents", "metadatas"]}
     if where is not None:
         corpus_kwargs["where"] = where
@@ -237,48 +250,66 @@ def retrieve_documents(
     corpus_documents = list(corpus.get("documents") or [])
     corpus_metadatas = list(corpus.get("metadatas") or [])
 
-    term_weights = _build_term_weights(clean_query, corpus_documents)
-    lexical_candidate_count = max(n_results * 10, 50)
-
-    lexical_ranked = []
-    for idx, document in enumerate(corpus_documents):
-        if not document:
-            continue
-        score = _keyword_overlap_score(clean_query, document, term_weights)
-        if score <= 0:
-            continue
-
-        doc_id = corpus_ids[idx] if idx < len(corpus_ids) else f"lexical-{idx}"
-        metadata = (
-            corpus_metadatas[idx]
-            if idx < len(corpus_metadatas) and corpus_metadatas[idx]
-            else {}
-        )
-        lexical_ranked.append((score, doc_id, document, metadata))
-
+    bm25_scores = _bm25_scores(clean_query, corpus_documents)
+    lexical_ranked = [
+        (score, idx)
+        for idx, score in enumerate(bm25_scores)
+        if score > 0
+    ]
     lexical_ranked.sort(key=lambda item: item[0], reverse=True)
+    lexical_candidate_count = min(
+        len(lexical_ranked),
+        max(n_results * 15, 100),
+    )
     lexical_ranked = lexical_ranked[:lexical_candidate_count]
 
     candidates: Dict[str, Dict[str, Any]] = {}
 
-    for idx, document in enumerate(semantic_documents):
+    for semantic_rank, document in enumerate(semantic_documents, start=1):
         if not document:
             continue
-        doc_id = semantic_ids[idx] if idx < len(semantic_ids) else f"semantic-{idx}"
+        idx = semantic_rank - 1
+        doc_id = (
+            semantic_ids[idx]
+            if idx < len(semantic_ids)
+            else f"semantic-{idx}"
+        )
         metadata = (
             semantic_metadatas[idx]
             if idx < len(semantic_metadatas) and semantic_metadatas[idx]
             else {}
         )
-        distance = semantic_distances[idx] if idx < len(semantic_distances) else None
+        distance = (
+            semantic_distances[idx]
+            if idx < len(semantic_distances)
+            else None
+        )
         candidates[doc_id] = {
             "id": doc_id,
             "document": document,
             "metadata": metadata,
             "distance": distance,
+            "semantic_rank": semantic_rank,
+            "lexical_rank": None,
+            "bm25_score": 0.0,
         }
 
-    for keyword_score, doc_id, document, metadata in lexical_ranked:
+    for lexical_rank, (bm25_score, idx) in enumerate(lexical_ranked, start=1):
+        document = corpus_documents[idx]
+        if not document:
+            continue
+
+        doc_id = (
+            corpus_ids[idx]
+            if idx < len(corpus_ids)
+            else f"lexical-{idx}"
+        )
+        metadata = (
+            corpus_metadatas[idx]
+            if idx < len(corpus_metadatas) and corpus_metadatas[idx]
+            else {}
+        )
+
         candidate = candidates.setdefault(
             doc_id,
             {
@@ -286,79 +317,41 @@ def retrieve_documents(
                 "document": document,
                 "metadata": metadata,
                 "distance": None,
+                "semantic_rank": None,
+                "lexical_rank": None,
+                "bm25_score": 0.0,
             },
         )
-        candidate["keyword_score"] = keyword_score
-
-    candidate_ids = list(candidates)
-    embedding_lookup: Dict[str, List[float]] = {}
-    if candidate_ids:
-        embedding_rows = collection.get(ids=candidate_ids, include=["embeddings"])
-        embedding_ids = list(embedding_rows.get("ids") or [])
-        embedding_values = embedding_rows.get("embeddings")
-        if embedding_values is not None:
-            for doc_id, embedding in zip(embedding_ids, embedding_values):
-                if embedding is not None:
-                    embedding_lookup[doc_id] = list(embedding)
-
-    cosine_scores = []
-    for candidate in candidates.values():
-        keyword_score = candidate.get("keyword_score")
-        if keyword_score is None:
-            keyword_score = _keyword_overlap_score(
-                clean_query,
-                candidate["document"],
-                term_weights,
-            )
-        candidate["keyword_score"] = keyword_score
-
-        embedding = embedding_lookup.get(candidate["id"])
-        cosine_score = _cosine_similarity(query_embedding, embedding) if embedding else 0.0
-        candidate["cosine_score"] = cosine_score
-        cosine_scores.append(cosine_score)
-
-    min_cosine = min(cosine_scores) if cosine_scores else 0.0
-    max_cosine = max(cosine_scores) if cosine_scores else 0.0
-    cosine_span = max_cosine - min_cosine
+        candidate["lexical_rank"] = lexical_rank
+        candidate["bm25_score"] = bm25_score
 
     ranked = []
     for candidate in candidates.values():
-        semantic_score = (
-            1.0
-            if cosine_span == 0 and candidate["cosine_score"] != 0.0
-            else (
-                (candidate["cosine_score"] - min_cosine) / cosine_span
-                if cosine_span
-                else 0.0
-            )
+        rrf = _rrf_score(
+            candidate.get("semantic_rank"),
+            candidate.get("lexical_rank"),
         )
-        keyword_score = candidate["keyword_score"]
-
-        hybrid_score = (0.65 * semantic_score) + (0.35 * keyword_score)
-        distance = candidate["distance"]
-        if not isinstance(distance, (int, float)):
-            distance = 1.0 - candidate["cosine_score"]
-
         ranked.append(
             (
-                hybrid_score,
-                keyword_score,
-                semantic_score,
-                distance,
+                rrf,
+                candidate.get("bm25_score", 0.0),
+                candidate.get("semantic_rank") or float("inf"),
                 candidate["id"],
                 candidate["document"],
                 candidate["metadata"],
+                candidate["distance"],
             )
         )
 
-    ranked.sort(key=lambda item: (-item[0], -item[1], -item[2]))
+    # RRF is the primary score. BM25 and semantic rank only break close/tied cases.
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
 
     unique = []
     selected_documents: List[str] = []
     seen_exact = set()
 
     for item in ranked:
-        document = item[5]
+        document = item[4]
         normalized = " ".join(document.lower().split())
         if normalized in seen_exact:
             continue
@@ -373,10 +366,10 @@ def retrieve_documents(
             break
 
     return {
-        "ids": [[item[4] for item in unique]],
-        "documents": [[item[5] for item in unique]],
-        "metadatas": [[item[6] for item in unique]],
-        "distances": [[item[3] for item in unique]],
+        "ids": [[item[3] for item in unique]],
+        "documents": [[item[4] for item in unique]],
+        "metadatas": [[item[5] for item in unique]],
+        "distances": [[item[6] for item in unique]],
     }
 
 
