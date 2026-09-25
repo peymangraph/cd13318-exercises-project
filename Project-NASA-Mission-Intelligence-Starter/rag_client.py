@@ -69,6 +69,58 @@ def _embed_query(query: str, openai_key: str, embedding_model: str) -> List[floa
     return response.data[0].embedding
 
 
+
+def _reformulate_retrieval_query(
+    query: str,
+    mission_filter: Optional[str],
+    openai_key: str,
+    model: str = "gpt-4o-mini",
+) -> str:
+    """Create a compact retrieval-oriented query while preserving user intent.
+
+    This is a retrieval-only transformation. The original user question is still
+    passed unchanged to the answer-generation model. If reformulation fails, the
+    original query is returned so retrieval continues normally.
+    """
+    base_url = "https://openai.vocareum.com/v1" if openai_key.startswith("voc") else None
+    client = OpenAI(api_key=openai_key, base_url=base_url)
+
+    mission_context = ""
+    if mission_filter and mission_filter.lower() not in {"all", "any", "none"}:
+        mission_context = f"Mission filter: {mission_filter}. "
+
+    system_prompt = (
+        "You rewrite user questions into concise search queries for retrieval-augmented "
+        "generation. Preserve named entities, mission names, dates, technical terms, and "
+        "the user's intent. Add useful synonyms or closely related technical vocabulary "
+        "only when they are strongly implied by the question. Do not answer the question. "
+        "Do not invent facts. Return one compact retrieval query only."
+    )
+
+    user_prompt = (
+        f"{mission_context}"
+        f"Original question: {query}\n"
+        "Rewrite this as a retrieval query of roughly 8 to 24 informative words or short phrases."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        rewritten = (response.choices[0].message.content or "").strip()
+        if not rewritten:
+            return query
+        # Keep the original wording alongside the rewrite so precise terms are never lost.
+        return f"{query}\n{rewritten}"
+    except Exception:
+        return query
+
+
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "does",
     "for", "from", "had", "has", "have", "how", "in", "is", "it", "of",
@@ -224,8 +276,13 @@ def retrieve_documents(
         where = {"mission": mission_filter}
 
     clean_query = query.strip()
-    lexical_query = _lexical_query(clean_query, mission_filter)
-    query_embedding = _embed_query(clean_query, api_key, embedding_model)
+    retrieval_query = _reformulate_retrieval_query(
+        clean_query,
+        mission_filter,
+        api_key,
+    )
+    lexical_query = _lexical_query(retrieval_query, mission_filter)
+    query_embedding = _embed_query(retrieval_query, api_key, embedding_model)
 
     try:
         collection_size = collection.count()
