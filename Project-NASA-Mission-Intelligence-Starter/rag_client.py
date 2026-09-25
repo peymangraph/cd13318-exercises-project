@@ -73,7 +73,7 @@ STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "does",
     "for", "from", "had", "has", "have", "how", "in", "is", "it", "of",
     "on", "or", "that", "the", "their", "this", "to", "was", "were", "what",
-    "when", "where", "which", "who", "why", "with",
+    "when", "where", "which", "who", "why", "with", "during", "happened",
 }
 
 
@@ -84,6 +84,17 @@ def _keyword_terms(text: str) -> List[str]:
         for token in re.findall(r"[a-z0-9]+", text.lower())
         if token not in STOP_WORDS and len(token) > 1
     ]
+
+
+def _lexical_query(query: str, mission_filter: Optional[str]) -> str:
+    """Remove mission-filter terms that add no lexical discrimination."""
+    if not mission_filter or mission_filter.lower() in {"all", "any", "none"}:
+        return query
+
+    mission_terms = set(_keyword_terms(mission_filter.replace("_", " ")))
+    tokens = re.findall(r"[a-z0-9]+", query.lower())
+    filtered = [token for token in tokens if token not in mission_terms]
+    return " ".join(filtered) or query
 
 
 def _bm25_scores(
@@ -196,7 +207,7 @@ def retrieve_documents(
     openai_key: Optional[str] = None,
     embedding_model: str = "text-embedding-3-small",
 ) -> Optional[Dict[str, Any]]:
-    """Fuse semantic and BM25 lexical rankings, then deduplicate the final top-k."""
+    """Build a balanced semantic/BM25 pool, expand neighbors, and keep top-k."""
     if collection is None:
         raise ValueError("A ChromaDB collection is required.")
     if not query or not query.strip():
@@ -213,6 +224,7 @@ def retrieve_documents(
         where = {"mission": mission_filter}
 
     clean_query = query.strip()
+    lexical_query = _lexical_query(clean_query, mission_filter)
     query_embedding = _embed_query(clean_query, api_key, embedding_model)
 
     try:
@@ -223,8 +235,8 @@ def retrieve_documents(
     if collection_size == 0:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-    # Semantic ranking from ChromaDB.
-    semantic_candidate_count = min(collection_size, max(n_results * 15, 100))
+    # Pull a broad semantic ranking.
+    semantic_candidate_count = min(collection_size, max(n_results * 10, 50))
     semantic_kwargs = {
         "query_embeddings": [query_embedding],
         "n_results": semantic_candidate_count,
@@ -239,8 +251,7 @@ def retrieve_documents(
     semantic_metadatas = (semantic_raw.get("metadatas") or [[]])[0]
     semantic_distances = (semantic_raw.get("distances") or [[]])[0]
 
-    # Lexical ranking scans every chunk in the selected mission/corpus so rare
-    # incident terms can surface even when semantic retrieval misses them.
+    # Load every chunk in the selected mission/corpus for BM25 and neighbor lookup.
     corpus_kwargs = {"include": ["documents", "metadatas"]}
     if where is not None:
         corpus_kwargs["where"] = where
@@ -250,25 +261,58 @@ def retrieve_documents(
     corpus_documents = list(corpus.get("documents") or [])
     corpus_metadatas = list(corpus.get("metadatas") or [])
 
-    bm25_scores = _bm25_scores(clean_query, corpus_documents)
+    corpus_by_id: Dict[str, Dict[str, Any]] = {}
+    neighbor_lookup: Dict[tuple, Dict[str, Any]] = {}
+
+    for idx, document in enumerate(corpus_documents):
+        if not document:
+            continue
+        doc_id = corpus_ids[idx] if idx < len(corpus_ids) else f"corpus-{idx}"
+        metadata = (
+            corpus_metadatas[idx]
+            if idx < len(corpus_metadatas) and corpus_metadatas[idx]
+            else {}
+        )
+        row = {
+            "id": doc_id,
+            "document": document,
+            "metadata": metadata,
+            "distance": None,
+            "semantic_rank": None,
+            "lexical_rank": None,
+            "bm25_score": 0.0,
+            "neighbor_of": None,
+        }
+        corpus_by_id[doc_id] = row
+
+        file_path = metadata.get("file_path")
+        chunk_index = metadata.get("chunk_index")
+        if file_path is not None and isinstance(chunk_index, int):
+            neighbor_lookup[(str(file_path), chunk_index)] = row
+
+    # Rank the complete filtered corpus lexically with BM25.
+    bm25_scores = _bm25_scores(lexical_query, corpus_documents)
     lexical_ranked = [
         (score, idx)
         for idx, score in enumerate(bm25_scores)
         if score > 0
     ]
     lexical_ranked.sort(key=lambda item: item[0], reverse=True)
-    lexical_candidate_count = min(
-        len(lexical_ranked),
-        max(n_results * 15, 100),
-    )
-    lexical_ranked = lexical_ranked[:lexical_candidate_count]
+
+    # Use equal-depth semantic and lexical seed pools so one retrieval method
+    # cannot crowd the other out before final selection.
+    per_source_seed_count = max(n_results * 2, 20)
+    semantic_seed_count = min(len(semantic_documents), per_source_seed_count)
+    lexical_seed_count = min(len(lexical_ranked), per_source_seed_count)
 
     candidates: Dict[str, Dict[str, Any]] = {}
 
-    for semantic_rank, document in enumerate(semantic_documents, start=1):
+    for semantic_rank in range(1, semantic_seed_count + 1):
+        idx = semantic_rank - 1
+        document = semantic_documents[idx]
         if not document:
             continue
-        idx = semantic_rank - 1
+
         doc_id = (
             semantic_ids[idx]
             if idx < len(semantic_ids)
@@ -284,19 +328,31 @@ def retrieve_documents(
             if idx < len(semantic_distances)
             else None
         )
-        candidates[doc_id] = {
-            "id": doc_id,
-            "document": document,
-            "metadata": metadata,
-            "distance": distance,
-            "semantic_rank": semantic_rank,
-            "lexical_rank": None,
-            "bm25_score": 0.0,
-        }
 
-    for lexical_rank, (bm25_score, idx) in enumerate(lexical_ranked, start=1):
-        document = corpus_documents[idx]
-        if not document:
+        candidate = dict(
+            corpus_by_id.get(
+                doc_id,
+                {
+                    "id": doc_id,
+                    "document": document,
+                    "metadata": metadata,
+                    "distance": distance,
+                    "semantic_rank": None,
+                    "lexical_rank": None,
+                    "bm25_score": 0.0,
+                    "neighbor_of": None,
+                },
+            )
+        )
+        candidate["document"] = document
+        candidate["metadata"] = metadata
+        candidate["distance"] = distance
+        candidate["semantic_rank"] = semantic_rank
+        candidates[doc_id] = candidate
+
+    for lexical_rank in range(1, lexical_seed_count + 1):
+        bm25_score, idx = lexical_ranked[lexical_rank - 1]
+        if idx >= len(corpus_documents) or not corpus_documents[idx]:
             continue
 
         doc_id = (
@@ -304,38 +360,69 @@ def retrieve_documents(
             if idx < len(corpus_ids)
             else f"lexical-{idx}"
         )
-        metadata = (
-            corpus_metadatas[idx]
-            if idx < len(corpus_metadatas) and corpus_metadatas[idx]
-            else {}
-        )
+        candidate = candidates.get(doc_id)
+        if candidate is None:
+            candidate = dict(corpus_by_id[doc_id])
 
-        candidate = candidates.setdefault(
-            doc_id,
-            {
-                "id": doc_id,
-                "document": document,
-                "metadata": metadata,
-                "distance": None,
-                "semantic_rank": None,
-                "lexical_rank": None,
-                "bm25_score": 0.0,
-            },
-        )
         candidate["lexical_rank"] = lexical_rank
         candidate["bm25_score"] = bm25_score
+        candidates[doc_id] = candidate
 
+    seed_ids = list(candidates)
+
+    # Add the immediately adjacent chunks around every seed so the LLM receives
+    # enough local transcript/document continuity to understand the event.
+    for seed_id in seed_ids:
+        seed = candidates[seed_id]
+        metadata = seed.get("metadata") or {}
+        file_path = metadata.get("file_path")
+        chunk_index = metadata.get("chunk_index")
+        if file_path is None or not isinstance(chunk_index, int):
+            continue
+
+        for delta in (-1, 1):
+            neighbor = neighbor_lookup.get((str(file_path), chunk_index + delta))
+            if not neighbor:
+                continue
+
+            neighbor_id = neighbor["id"]
+            if neighbor_id in candidates:
+                continue
+
+            expanded = dict(neighbor)
+            expanded["neighbor_of"] = seed_id
+            expanded["semantic_rank"] = seed.get("semantic_rank")
+            expanded["lexical_rank"] = seed.get("lexical_rank")
+            expanded["bm25_score"] = seed.get("bm25_score", 0.0)
+            candidates[neighbor_id] = expanded
+
+    # Give semantic and lexical rank equal standing. A chunk that is strong in
+    # either channel remains competitive; appearing in both provides a small bonus.
     ranked = []
     for candidate in candidates.values():
-        rrf = _rrf_score(
-            candidate.get("semantic_rank"),
-            candidate.get("lexical_rank"),
+        semantic_rank = candidate.get("semantic_rank")
+        lexical_rank = candidate.get("lexical_rank")
+
+        semantic_strength = (
+            1.0 / semantic_rank if isinstance(semantic_rank, int) and semantic_rank > 0 else 0.0
         )
+        lexical_strength = (
+            1.0 / lexical_rank if isinstance(lexical_rank, int) and lexical_rank > 0 else 0.0
+        )
+
+        primary_strength = max(semantic_strength, lexical_strength)
+        secondary_strength = min(semantic_strength, lexical_strength)
+        balanced_score = primary_strength + (0.15 * secondary_strength)
+
+        if candidate.get("neighbor_of"):
+            balanced_score *= 0.92
+
         ranked.append(
             (
-                rrf,
+                balanced_score,
                 candidate.get("bm25_score", 0.0),
-                candidate.get("semantic_rank") or float("inf"),
+                semantic_rank or float("inf"),
+                lexical_rank or float("inf"),
                 candidate["id"],
                 candidate["document"],
                 candidate["metadata"],
@@ -343,15 +430,14 @@ def retrieve_documents(
             )
         )
 
-    # RRF is the primary score. BM25 and semantic rank only break close/tied cases.
-    ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
 
     unique = []
     selected_documents: List[str] = []
     seen_exact = set()
 
     for item in ranked:
-        document = item[4]
+        document = item[5]
         normalized = " ".join(document.lower().split())
         if normalized in seen_exact:
             continue
@@ -366,10 +452,10 @@ def retrieve_documents(
             break
 
     return {
-        "ids": [[item[3] for item in unique]],
-        "documents": [[item[4] for item in unique]],
-        "metadatas": [[item[5] for item in unique]],
-        "distances": [[item[6] for item in unique]],
+        "ids": [[item[4] for item in unique]],
+        "documents": [[item[5] for item in unique]],
+        "metadatas": [[item[6] for item in unique]],
+        "distances": [[item[7] for item in unique]],
     }
 
 
