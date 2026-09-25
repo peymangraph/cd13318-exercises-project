@@ -43,15 +43,15 @@ The completed coursework and NASA Mission Intelligence project are now on the re
 - GitHub Actions syntax/completeness checks are included.
 - Repository ownership metadata is configured for **@peymangraph** on the working branch.
 - Latest Udacity upstream content has been synchronized before final validation.
+- Runtime embedding validation completed successfully: 12 NASA source files produced 15,563 chunks with 0 errors.
 
 ### Remaining Before Final Merge
 
 Complete these in order:
 
-1. Run the full NASA embedding pipeline and populate ChromaDB.
-2. Run the Streamlit end-to-end smoke test.
-3. Run the complete RAGAS batch evaluation and record metrics.
-4. Perform the final submission audit on `main`.
+1. Run the Streamlit end-to-end smoke test against the populated ChromaDB.
+2. Run the complete RAGAS batch evaluation and record metrics.
+3. Perform the final submission audit on `main`.
 
 The detailed completion checklist is maintained in **`TASKS.md`**.
 
