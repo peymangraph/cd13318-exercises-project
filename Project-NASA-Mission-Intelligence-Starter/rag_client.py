@@ -97,6 +97,46 @@ def _lexical_query(query: str, mission_filter: Optional[str]) -> str:
     return " ".join(filtered) or query
 
 
+BROAD_EVENT_TERMS = {
+    "cause", "caused", "why", "failure", "failed", "disaster", "accident",
+    "explosion", "incident", "happened", "effect", "affected", "affect",
+}
+
+
+MISSION_RETRIEVAL_HINTS = {
+    "challenger": (
+        "o-ring field joint solid rocket booster seal failure hot gas "
+        "cold temperature launch"
+    ),
+    "apollo 13": (
+        "oxygen tank cryogenic oxygen service module fuel cell explosion "
+        "rupture leak electrical power loss"
+    ),
+}
+
+
+def _expand_retrieval_query(query: str, mission_filter: Optional[str]) -> str:
+    """Enrich broad event/cause questions with mission-specific technical terms.
+
+    The original user question is still sent to the LLM unchanged. This expansion
+    is retrieval-only and helps broad wording surface technical evidence whose
+    vocabulary differs from the question.
+    """
+    if not mission_filter:
+        return query
+
+    mission_key = mission_filter.replace("_", " ").strip().lower()
+    hints = MISSION_RETRIEVAL_HINTS.get(mission_key)
+    if not hints:
+        return query
+
+    query_terms = set(_keyword_terms(query))
+    if not query_terms.intersection(BROAD_EVENT_TERMS):
+        return query
+
+    return f"{query} {hints}"
+
+
 def _bm25_scores(
     query: str,
     documents: List[str],
@@ -224,8 +264,9 @@ def retrieve_documents(
         where = {"mission": mission_filter}
 
     clean_query = query.strip()
-    lexical_query = _lexical_query(clean_query, mission_filter)
-    query_embedding = _embed_query(clean_query, api_key, embedding_model)
+    retrieval_query = _expand_retrieval_query(clean_query, mission_filter)
+    lexical_query = _lexical_query(retrieval_query, mission_filter)
+    query_embedding = _embed_query(retrieval_query, api_key, embedding_model)
 
     try:
         collection_size = collection.count()
