@@ -16,7 +16,7 @@ GitHub Issues are currently disabled for this repository, so this file is the ac
 - [x] Add final setup and rubric-compliance documentation.
 - [x] Add GitHub Actions syntax/completeness workflow.
 - [x] Confirm the GitHub Actions workflow runs successfully.
-- [ ] Run the full embedding pipeline with a valid OpenAI API key.
+- [x] Run the full embedding pipeline with the Udacity/Vocareum API key (12 source files, 15,563 chunks, 0 errors).
 - [ ] Run the Streamlit end-to-end smoke test against the populated ChromaDB.
 - [ ] Run the complete RAGAS batch evaluation and record the resulting metrics.
 
