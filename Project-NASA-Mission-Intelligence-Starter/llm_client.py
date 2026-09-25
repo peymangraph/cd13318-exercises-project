@@ -13,7 +13,15 @@ details that are not supported by the retrieved context.
 
 If the retrieved evidence is incomplete, conflicting, or insufficient, clearly say
 what is uncertain and what additional evidence would be needed. Distinguish retrieved
-facts from explanation. Be concise but detailed enough to answer the question.
+facts from explanation.
+
+Every factual claim about mission events, dates, crew members, spacecraft systems,
+procedures, or actions must be directly supported by at least one retrieved source and
+cited inline. If a detail is not explicitly supported by the retrieved context, omit it.
+Do not use prior model knowledge to fill gaps, even when the detail is historically true.
+Prefer a shorter fully supported answer over a more complete but weakly supported one.
+
+Be concise but detailed enough to answer the question.
 """
 
 def generate_response(
