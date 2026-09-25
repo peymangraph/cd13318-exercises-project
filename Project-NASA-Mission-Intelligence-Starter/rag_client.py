@@ -60,7 +60,8 @@ def initialize_rag_system(chroma_dir: str, collection_name: str):
 
 
 def _embed_query(query: str, openai_key: str, embedding_model: str) -> List[float]:
-    client = OpenAI(api_key=openai_key)
+    base_url = "https://openai.vocareum.com/v1" if openai_key.startswith("voc") else None
+    client = OpenAI(api_key=openai_key, base_url=base_url)
     response = client.embeddings.create(model=embedding_model, input=query)
     return response.data[0].embedding
 
