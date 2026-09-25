@@ -54,7 +54,8 @@ def generate_response(
     )
     messages.append({"role": "user", "content": grounded_user_message})
 
-    client = OpenAI(api_key=openai_key)
+    base_url = "https://openai.vocareum.com/v1" if openai_key.startswith("voc") else None
+    client = OpenAI(api_key=openai_key, base_url=base_url)
     response = client.chat.completions.create(
         model=model,
         messages=messages,
