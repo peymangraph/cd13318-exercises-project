@@ -70,17 +70,17 @@ def _embed_query(query: str, openai_key: str, embedding_model: str) -> List[floa
 
 
 
-def _reformulate_retrieval_query(
+def _generate_retrieval_queries(
     query: str,
     mission_filter: Optional[str],
     openai_key: str,
     model: str = "gpt-4o-mini",
-) -> str:
-    """Create a compact retrieval-oriented query while preserving user intent.
+) -> List[str]:
+    """Generate two complementary retrieval queries from one user question.
 
-    This is a retrieval-only transformation. The original user question is still
-    passed unchanged to the answer-generation model. If reformulation fails, the
-    original query is returned so retrieval continues normally.
+    The queries are retrieval-only. The original question is still passed unchanged
+    to the answer-generation model. If generation fails, fall back to the original
+    question so retrieval remains functional.
     """
     base_url = "https://openai.vocareum.com/v1" if openai_key.startswith("voc") else None
     client = OpenAI(api_key=openai_key, base_url=base_url)
@@ -90,17 +90,18 @@ def _reformulate_retrieval_query(
         mission_context = f"Mission filter: {mission_filter}. "
 
     system_prompt = (
-        "You rewrite user questions into concise search queries for retrieval-augmented "
-        "generation. Preserve named entities, mission names, dates, technical terms, and "
-        "the user's intent. Add useful synonyms or closely related technical vocabulary "
-        "only when they are strongly implied by the question. Do not answer the question. "
-        "Do not invent facts. Return one compact retrieval query only."
+        "You create search queries for retrieval-augmented generation. "
+        "Given one user question, produce exactly two complementary focused search "
+        "queries that together cover the full information need. Preserve named entities, "
+        "mission names, dates, and technical terminology. Use closely related synonyms "
+        "only when strongly implied by the question. Do not answer the question and do "
+        "not invent facts. Return exactly two plain-text lines and nothing else."
     )
 
     user_prompt = (
         f"{mission_context}"
         f"Original question: {query}\n"
-        "Rewrite this as a retrieval query of roughly 8 to 24 informative words or short phrases."
+        "Write two complementary retrieval queries, each roughly 6 to 18 informative words."
     )
 
     try:
@@ -112,13 +113,20 @@ def _reformulate_retrieval_query(
                 {"role": "user", "content": user_prompt},
             ],
         )
-        rewritten = (response.choices[0].message.content or "").strip()
-        if not rewritten:
-            return query
-        # Keep the original wording alongside the rewrite so precise terms are never lost.
-        return f"{query}\n{rewritten}"
+        raw = (response.choices[0].message.content or "").strip()
+        lines = []
+        for line in raw.splitlines():
+            cleaned = re.sub(r"^\\s*(?:[-*]|\\d+[.)])\\s*", "", line).strip()
+            if cleaned and cleaned.lower() not in {item.lower() for item in lines}:
+                lines.append(cleaned)
+
+        if not lines:
+            return [query, query]
+        if len(lines) == 1:
+            return [lines[0], query]
+        return lines[:2]
     except Exception:
-        return query
+        return [query, query]
 
 
 STOP_WORDS = {
@@ -259,7 +267,7 @@ def retrieve_documents(
     openai_key: Optional[str] = None,
     embedding_model: str = "text-embedding-3-small",
 ) -> Optional[Dict[str, Any]]:
-    """Build a balanced semantic/BM25 pool, expand neighbors, and keep top-k."""
+    """Retrieve with two focused queries, semantic + BM25 fusion, and neighbors."""
     if collection is None:
         raise ValueError("A ChromaDB collection is required.")
     if not query or not query.strip():
@@ -276,13 +284,11 @@ def retrieve_documents(
         where = {"mission": mission_filter}
 
     clean_query = query.strip()
-    retrieval_query = _reformulate_retrieval_query(
+    retrieval_queries = _generate_retrieval_queries(
         clean_query,
         mission_filter,
         api_key,
     )
-    lexical_query = _lexical_query(retrieval_query, mission_filter)
-    query_embedding = _embed_query(retrieval_query, api_key, embedding_model)
 
     try:
         collection_size = collection.count()
@@ -292,23 +298,7 @@ def retrieve_documents(
     if collection_size == 0:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-    # Pull a broad semantic ranking.
-    semantic_candidate_count = min(collection_size, max(n_results * 10, 50))
-    semantic_kwargs = {
-        "query_embeddings": [query_embedding],
-        "n_results": semantic_candidate_count,
-        "include": ["documents", "metadatas", "distances"],
-    }
-    if where is not None:
-        semantic_kwargs["where"] = where
-
-    semantic_raw = collection.query(**semantic_kwargs)
-    semantic_ids = (semantic_raw.get("ids") or [[]])[0]
-    semantic_documents = (semantic_raw.get("documents") or [[]])[0]
-    semantic_metadatas = (semantic_raw.get("metadatas") or [[]])[0]
-    semantic_distances = (semantic_raw.get("distances") or [[]])[0]
-
-    # Load every chunk in the selected mission/corpus for BM25 and neighbor lookup.
+    # Load the filtered corpus once for BM25 scoring and neighbor lookup.
     corpus_kwargs = {"include": ["documents", "metadatas"]}
     if where is not None:
         corpus_kwargs["where"] = where
@@ -335,9 +325,9 @@ def retrieve_documents(
             "document": document,
             "metadata": metadata,
             "distance": None,
-            "semantic_rank": None,
-            "lexical_rank": None,
-            "bm25_score": 0.0,
+            "semantic_ranks": {},
+            "lexical_ranks": {},
+            "bm25_scores": {},
             "neighbor_of": None,
         }
         corpus_by_id[doc_id] = row
@@ -347,88 +337,106 @@ def retrieve_documents(
         if file_path is not None and isinstance(chunk_index, int):
             neighbor_lookup[(str(file_path), chunk_index)] = row
 
-    # Rank the complete filtered corpus lexically with BM25.
-    bm25_scores = _bm25_scores(lexical_query, corpus_documents)
-    lexical_ranked = [
-        (score, idx)
-        for idx, score in enumerate(bm25_scores)
-        if score > 0
-    ]
-    lexical_ranked.sort(key=lambda item: item[0], reverse=True)
-
-    # Use equal-depth semantic and lexical seed pools so one retrieval method
-    # cannot crowd the other out before final selection.
-    per_source_seed_count = max(n_results * 2, 20)
-    semantic_seed_count = min(len(semantic_documents), per_source_seed_count)
-    lexical_seed_count = min(len(lexical_ranked), per_source_seed_count)
-
     candidates: Dict[str, Dict[str, Any]] = {}
+    semantic_candidate_count = min(collection_size, max(n_results * 8, 40))
+    per_query_seed_count = max(n_results * 2, 20)
 
-    for semantic_rank in range(1, semantic_seed_count + 1):
-        idx = semantic_rank - 1
-        document = semantic_documents[idx]
-        if not document:
-            continue
+    # Run semantic and BM25 retrieval independently for each focused query.
+    for query_index, focused_query in enumerate(retrieval_queries):
+        query_embedding = _embed_query(focused_query, api_key, embedding_model)
 
-        doc_id = (
-            semantic_ids[idx]
-            if idx < len(semantic_ids)
-            else f"semantic-{idx}"
-        )
-        metadata = (
-            semantic_metadatas[idx]
-            if idx < len(semantic_metadatas) and semantic_metadatas[idx]
-            else {}
-        )
-        distance = (
-            semantic_distances[idx]
-            if idx < len(semantic_distances)
-            else None
-        )
+        semantic_kwargs = {
+            "query_embeddings": [query_embedding],
+            "n_results": semantic_candidate_count,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where is not None:
+            semantic_kwargs["where"] = where
 
-        candidate = dict(
-            corpus_by_id.get(
-                doc_id,
-                {
-                    "id": doc_id,
-                    "document": document,
-                    "metadata": metadata,
-                    "distance": distance,
-                    "semantic_rank": None,
-                    "lexical_rank": None,
-                    "bm25_score": 0.0,
-                    "neighbor_of": None,
-                },
+        semantic_raw = collection.query(**semantic_kwargs)
+        semantic_ids = (semantic_raw.get("ids") or [[]])[0]
+        semantic_documents = (semantic_raw.get("documents") or [[]])[0]
+        semantic_metadatas = (semantic_raw.get("metadatas") or [[]])[0]
+        semantic_distances = (semantic_raw.get("distances") or [[]])[0]
+
+        semantic_seed_count = min(len(semantic_documents), per_query_seed_count)
+        for semantic_rank in range(1, semantic_seed_count + 1):
+            idx = semantic_rank - 1
+            document = semantic_documents[idx]
+            if not document:
+                continue
+
+            doc_id = semantic_ids[idx] if idx < len(semantic_ids) else f"semantic-{query_index}-{idx}"
+            metadata = (
+                semantic_metadatas[idx]
+                if idx < len(semantic_metadatas) and semantic_metadatas[idx]
+                else {}
             )
-        )
-        candidate["document"] = document
-        candidate["metadata"] = metadata
-        candidate["distance"] = distance
-        candidate["semantic_rank"] = semantic_rank
-        candidates[doc_id] = candidate
+            distance = semantic_distances[idx] if idx < len(semantic_distances) else None
 
-    for lexical_rank in range(1, lexical_seed_count + 1):
-        bm25_score, idx = lexical_ranked[lexical_rank - 1]
-        if idx >= len(corpus_documents) or not corpus_documents[idx]:
-            continue
+            candidate = candidates.get(doc_id)
+            if candidate is None:
+                candidate = dict(
+                    corpus_by_id.get(
+                        doc_id,
+                        {
+                            "id": doc_id,
+                            "document": document,
+                            "metadata": metadata,
+                            "distance": distance,
+                            "semantic_ranks": {},
+                            "lexical_ranks": {},
+                            "bm25_scores": {},
+                            "neighbor_of": None,
+                        },
+                    )
+                )
+                candidate["semantic_ranks"] = dict(candidate.get("semantic_ranks") or {})
+                candidate["lexical_ranks"] = dict(candidate.get("lexical_ranks") or {})
+                candidate["bm25_scores"] = dict(candidate.get("bm25_scores") or {})
 
-        doc_id = (
-            corpus_ids[idx]
-            if idx < len(corpus_ids)
-            else f"lexical-{idx}"
-        )
-        candidate = candidates.get(doc_id)
-        if candidate is None:
-            candidate = dict(corpus_by_id[doc_id])
+            candidate["document"] = document
+            candidate["metadata"] = metadata
+            if distance is not None and (
+                candidate.get("distance") is None or distance < candidate["distance"]
+            ):
+                candidate["distance"] = distance
+            candidate["semantic_ranks"][query_index] = semantic_rank
+            candidates[doc_id] = candidate
 
-        candidate["lexical_rank"] = lexical_rank
-        candidate["bm25_score"] = bm25_score
-        candidates[doc_id] = candidate
+        lexical_query = _lexical_query(focused_query, mission_filter)
+        bm25_scores = _bm25_scores(lexical_query, corpus_documents)
+        lexical_ranked = [
+            (score, idx)
+            for idx, score in enumerate(bm25_scores)
+            if score > 0
+        ]
+        lexical_ranked.sort(key=lambda item: item[0], reverse=True)
+
+        lexical_seed_count = min(len(lexical_ranked), per_query_seed_count)
+        for lexical_rank in range(1, lexical_seed_count + 1):
+            bm25_score, idx = lexical_ranked[lexical_rank - 1]
+            if idx >= len(corpus_documents) or not corpus_documents[idx]:
+                continue
+
+            doc_id = corpus_ids[idx] if idx < len(corpus_ids) else f"lexical-{query_index}-{idx}"
+            candidate = candidates.get(doc_id)
+            if candidate is None:
+                base = corpus_by_id.get(doc_id)
+                if base is None:
+                    continue
+                candidate = dict(base)
+                candidate["semantic_ranks"] = {}
+                candidate["lexical_ranks"] = {}
+                candidate["bm25_scores"] = {}
+
+            candidate["lexical_ranks"][query_index] = lexical_rank
+            candidate["bm25_scores"][query_index] = bm25_score
+            candidates[doc_id] = candidate
 
     seed_ids = list(candidates)
 
-    # Add the immediately adjacent chunks around every seed so the LLM receives
-    # enough local transcript/document continuity to understand the event.
+    # Add immediately adjacent chunks around merged seeds for local continuity.
     for seed_id in seed_ids:
         seed = candidates[seed_id]
         metadata = seed.get("metadata") or {}
@@ -447,39 +455,44 @@ def retrieve_documents(
                 continue
 
             expanded = dict(neighbor)
+            expanded["semantic_ranks"] = dict(seed.get("semantic_ranks") or {})
+            expanded["lexical_ranks"] = dict(seed.get("lexical_ranks") or {})
+            expanded["bm25_scores"] = dict(seed.get("bm25_scores") or {})
             expanded["neighbor_of"] = seed_id
-            expanded["semantic_rank"] = seed.get("semantic_rank")
-            expanded["lexical_rank"] = seed.get("lexical_rank")
-            expanded["bm25_score"] = seed.get("bm25_score", 0.0)
             candidates[neighbor_id] = expanded
 
-    # Give semantic and lexical rank equal standing. A chunk that is strong in
-    # either channel remains competitive; appearing in both provides a small bonus.
+    # Fuse evidence across both focused queries and both retrieval channels.
     ranked = []
     for candidate in candidates.values():
-        semantic_rank = candidate.get("semantic_rank")
-        lexical_rank = candidate.get("lexical_rank")
+        semantic_ranks = candidate.get("semantic_ranks") or {}
+        lexical_ranks = candidate.get("lexical_ranks") or {}
 
-        semantic_strength = (
-            1.0 / semantic_rank if isinstance(semantic_rank, int) and semantic_rank > 0 else 0.0
+        semantic_score = sum(
+            1.0 / (60 + rank)
+            for rank in semantic_ranks.values()
+            if isinstance(rank, int) and rank > 0
         )
-        lexical_strength = (
-            1.0 / lexical_rank if isinstance(lexical_rank, int) and lexical_rank > 0 else 0.0
+        lexical_score = sum(
+            1.0 / (60 + rank)
+            for rank in lexical_ranks.values()
+            if isinstance(rank, int) and rank > 0
         )
-
-        primary_strength = max(semantic_strength, lexical_strength)
-        secondary_strength = min(semantic_strength, lexical_strength)
-        balanced_score = primary_strength + (0.15 * secondary_strength)
+        coverage_bonus = 0.01 * len(set(semantic_ranks) | set(lexical_ranks))
+        fused_score = semantic_score + lexical_score + coverage_bonus
 
         if candidate.get("neighbor_of"):
-            balanced_score *= 0.92
+            fused_score *= 0.92
+
+        best_bm25 = max((candidate.get("bm25_scores") or {0: 0.0}).values(), default=0.0)
+        best_semantic_rank = min(semantic_ranks.values(), default=float("inf"))
+        best_lexical_rank = min(lexical_ranks.values(), default=float("inf"))
 
         ranked.append(
             (
-                balanced_score,
-                candidate.get("bm25_score", 0.0),
-                semantic_rank or float("inf"),
-                lexical_rank or float("inf"),
+                fused_score,
+                best_bm25,
+                best_semantic_rank,
+                best_lexical_rank,
                 candidate["id"],
                 candidate["document"],
                 candidate["metadata"],
