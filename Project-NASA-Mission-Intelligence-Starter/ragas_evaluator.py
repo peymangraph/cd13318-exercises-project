@@ -17,11 +17,12 @@ except ImportError:
 
 
 async def _score_sample(question: str, answer: str, contexts: List[str], api_key: str) -> Dict[str, float]:
+    base_url = "https://openai.vocareum.com/v1" if api_key.startswith("voc") else None
     evaluator_llm = LangchainLLMWrapper(
-        ChatOpenAI(model="gpt-4o-mini", api_key=api_key, temperature=0)
+        ChatOpenAI(model="gpt-4o-mini", api_key=api_key, base_url=base_url, temperature=0)
     )
     evaluator_embeddings = LangchainEmbeddingsWrapper(
-        OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
+        OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key, base_url=base_url)
     )
 
     sample = SingleTurnSample(
