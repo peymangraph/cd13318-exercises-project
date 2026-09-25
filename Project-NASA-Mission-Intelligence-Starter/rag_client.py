@@ -66,6 +66,30 @@ def _embed_query(query: str, openai_key: str, embedding_model: str) -> List[floa
     return response.data[0].embedding
 
 
+def _normalized_tokens(text: str) -> set[str]:
+    """Normalize a chunk into tokens for exact and near-duplicate detection."""
+    return set(" ".join(text.lower().split()).split())
+
+
+def _is_near_duplicate(candidate: str, selected_documents: List[str], threshold: float = 0.9) -> bool:
+    """Return True when a candidate substantially duplicates an already selected chunk."""
+    candidate_tokens = _normalized_tokens(candidate)
+    if not candidate_tokens:
+        return True
+
+    for selected in selected_documents:
+        selected_tokens = _normalized_tokens(selected)
+        if not selected_tokens:
+            continue
+        union = candidate_tokens | selected_tokens
+        if not union:
+            continue
+        similarity = len(candidate_tokens & selected_tokens) / len(union)
+        if similarity >= threshold:
+            return True
+    return False
+
+
 def retrieve_documents(
     collection,
     query: str,
@@ -100,7 +124,9 @@ def retrieve_documents(
     if collection_size == 0:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-    candidate_count = min(collection_size, max(n_results * 2, n_results))
+    # Retrieve a substantially larger pool than the final top-k so that
+    # deduplication does not leave the final context dominated by overlapping chunks.
+    candidate_count = min(collection_size, max(n_results * 10, 50))
     kwargs = {
         "query_embeddings": [query_embedding],
         "n_results": candidate_count,
@@ -127,15 +153,25 @@ def retrieve_documents(
 
     ranked.sort(key=lambda item: item[0])
 
+    # Chroma distances are sorted strongest-first above. Walk that ranking and
+    # keep only distinct chunks so the final context contains the best available
+    # evidence rather than several nearly identical overlapping windows.
     unique = []
-    seen = set()
+    selected_documents: List[str] = []
+    seen_exact = set()
+
     for item in ranked:
-        normalized = " ".join(item[2].lower().split())
-        dedupe_key = normalized[:500]
-        if dedupe_key in seen:
+        document = item[2]
+        normalized = " ".join(document.lower().split())
+        if normalized in seen_exact:
             continue
-        seen.add(dedupe_key)
+        if _is_near_duplicate(document, selected_documents):
+            continue
+
+        seen_exact.add(normalized)
+        selected_documents.append(document)
         unique.append(item)
+
         if len(unique) >= n_results:
             break
 
