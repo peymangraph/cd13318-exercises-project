@@ -6,8 +6,8 @@ This is the completed Udacity final-project implementation for a Retrieval-Augme
 
 ## Architecture
 
-1. `embedding_pipeline.py` reads NASA text files, builds the main single-layer ChromaDB index, and also builds a dedicated Challenger-only embedding collection.
-2. `rag_client.py` uses the original single-layer hybrid retriever (semantic retrieval + BM25 + neighbor expansion). Challenger questions automatically route to the dedicated Challenger collection when it is available.
+1. `embedding_pipeline.py` reads each NASA source file and creates a separate ChromaDB collection for that file using the same OpenAI embedding model.
+2. `rag_client.py` searches every file collection relevant to the selected mission, reuses each query embedding across those collections, combines semantic candidates with global BM25 lexical scoring, expands adjacent chunks, and globally reranks the evidence before answer generation.
 3. `llm_client.py` generates a grounded answer using a NASA-expert system prompt, current retrieved context, and bounded conversation history.
 4. `ragas_evaluator.py` computes **Response Relevancy** and **Faithfulness** using RAGAS.
 5. `chat.py` provides the Streamlit interface.
@@ -70,14 +70,13 @@ The runtime options satisfy the project rubric:
 
 - `--chunk-size`
 - `--chunk-overlap`
-- `--challenger-collection-name`
 - `--chroma-dir`
 - `--collection-name`
 - `--embedding-model`
 - `--batch-size`
 - `--update-mode skip|update|replace`
 
-The pipeline creates `nasa_space_missions_text` as the main collection and `nasa_space_missions_text_challenger` as a dedicated Challenger-only collection by default. Both use 400-character chunks with 100-character overlap (25%). The dedicated Challenger index reduces competition from Apollo documents and is selected automatically for Challenger-filtered questions. The pipeline stores per-chunk metadata including `source`, `file_path`, `mission`, chunk index, chunk boundaries, and content hash.
+The pipeline creates one collection per source file. Collection names use the base prefix `nasa_space_missions_text__file__...`. With the current corpus this produces 12 independent file indexes: six Apollo 11, three Apollo 13, and three Challenger. All file indexes use the same embedding model, so a query is embedded once per query formulation and the resulting vector is reused against every relevant file collection. The default chunking remains 400 characters with 100-character overlap (25%), and per-chunk metadata includes `source`, `file_path`, `mission`, chunk index, chunk boundaries, collection name, and content hash.
 
 ## 2. Inspect collection statistics
 
@@ -88,7 +87,7 @@ This mode does not require an OpenAI API call:
       --collection-name nasa_space_missions_text \
       --stats-only
 
-The output includes total chunk count, unique source-document count, mission counts, data types, and document categories.
+The output reports the per-file architecture, number of source-file collections, total chunks, mission counts, and one row for every file collection including source, chunk count, chunk size, and overlap.
 
 ## 3. Launch the chat application
 
@@ -148,7 +147,10 @@ The runner:
 ### Retrieval & LLM Integration
 
 - User question is explicitly embedded with the OpenAI embedding model before Chroma similarity search.
-- A dedicated Challenger-only embedding collection is used automatically for Challenger-filtered retrieval, while Apollo questions continue to use the main single-layer collection.
+- Each source file has an independent Chroma collection, preventing a very large source file from suppressing candidates from smaller files.
+- Mission filtering limits retrieval to the relevant file collections.
+- Semantic retrieval runs independently per file, while BM25 scoring is computed globally across all files in the selected mission so lexical scores remain comparable.
+- Query embeddings are reused across file collections; the same OpenAI embedding model is used everywhere.
 - Runtime top-k retrieval: implemented.
 - Mission metadata filtering: implemented.
 - Results are score-sorted and deduplicated.
