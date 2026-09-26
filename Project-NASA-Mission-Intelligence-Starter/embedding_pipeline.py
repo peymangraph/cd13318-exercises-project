@@ -335,6 +335,143 @@ def list_file_collections(
     return rows
 
 
+def verify_file_collection(
+    client,
+    collection_name: str,
+) -> Dict[str, Any]:
+    """Verify that a collection's persisted vector index can answer a query."""
+    try:
+        collection = client.get_collection(name=collection_name)
+        sample = collection.get(limit=1, include=["embeddings"])
+        ids = list(sample.get("ids") or [])
+        embeddings = sample.get("embeddings")
+        if not ids or embeddings is None or len(embeddings) == 0:
+            return {
+                "collection_name": collection_name,
+                "ok": False,
+                "error": "Collection has no retrievable sample embedding.",
+            }
+
+        embedding = embeddings[0]
+        collection.query(
+            query_embeddings=[embedding],
+            n_results=1,
+            include=["documents", "metadatas", "distances"],
+        )
+        return {"collection_name": collection_name, "ok": True}
+    except Exception as exc:
+        return {
+            "collection_name": collection_name,
+            "ok": False,
+            "error": str(exc),
+        }
+
+
+def verify_per_file_indexes(
+    chroma_dir: str,
+    base_collection_name: str,
+) -> Dict[str, Any]:
+    """Check every per-file collection, including its on-disk HNSW segment."""
+    client = chromadb.PersistentClient(path=chroma_dir)
+    collections = list_file_collections(chroma_dir, base_collection_name)
+    checks = [
+        verify_file_collection(client, row["collection_name"])
+        for row in collections
+    ]
+    broken = [row for row in checks if not row["ok"]]
+    return {
+        "file_collection_count": len(checks),
+        "healthy": len(checks) - len(broken),
+        "broken": len(broken),
+        "checks": checks,
+    }
+
+
+def repair_broken_indexes(args: argparse.Namespace) -> Dict[str, Any]:
+    """Rebuild only per-file collections whose persisted vector index is broken."""
+    client = chromadb.PersistentClient(path=args.chroma_dir)
+    rows = list_file_collections(args.chroma_dir, args.collection_name)
+    row_by_name = {row["collection_name"]: row for row in rows}
+
+    verification = verify_per_file_indexes(
+        args.chroma_dir,
+        args.collection_name,
+    )
+    broken_checks = [
+        check for check in verification["checks"] if not check["ok"]
+    ]
+
+    repaired = []
+    failed = []
+
+    for check in broken_checks:
+        name = check["collection_name"]
+        row = row_by_name.get(name)
+        if not row:
+            failed.append(
+                {
+                    "collection_name": name,
+                    "error": "Collection metadata could not be read for repair.",
+                }
+            )
+            continue
+
+        file_path = Path(row["file_path"])
+        if not file_path.exists():
+            failed.append(
+                {
+                    "collection_name": name,
+                    "error": f"Source file not found: {file_path}",
+                }
+            )
+            continue
+
+        try:
+            client.delete_collection(name=name)
+            pipeline = ChromaEmbeddingPipelineTextOnly(
+                openai_api_key=args.openai_key,
+                chroma_persist_directory=args.chroma_dir,
+                collection_name=name,
+                embedding_model=args.embedding_model,
+                chunk_size=int(row.get("chunk_size") or args.chunk_size),
+                chunk_overlap=int(
+                    row.get("chunk_overlap") or args.chunk_overlap
+                ),
+            )
+            chunks = pipeline.process_text_file(file_path)
+            result = pipeline.add_documents_to_collection(
+                chunks,
+                file_path=file_path,
+                batch_size=args.batch_size,
+                update_mode="replace",
+            )
+            post_check = verify_file_collection(client, name)
+            if post_check["ok"]:
+                repaired.append(
+                    {
+                        "collection_name": name,
+                        "source": row.get("source"),
+                        "chunks": len(chunks),
+                        "added": result["added"],
+                    }
+                )
+            else:
+                failed.append(post_check)
+        except Exception as exc:
+            failed.append(
+                {
+                    "collection_name": name,
+                    "error": str(exc),
+                }
+            )
+
+    return {
+        "broken_found": len(broken_checks),
+        "repaired": repaired,
+        "failed": failed,
+    }
+
+
 def build_per_file_indexes(args: argparse.Namespace) -> Dict[str, Any]:
     files = scan_text_files(args.data_path)
     if not files:
@@ -428,11 +565,30 @@ def build_parser() -> argparse.ArgumentParser:
         default="skip",
     )
     parser.add_argument("--stats-only", action="store_true")
+    parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--repair-broken", action="store_true")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+
+    if args.verify_only:
+        print(
+            verify_per_file_indexes(
+                args.chroma_dir,
+                args.collection_name,
+            )
+        )
+        return
+
+    if args.repair_broken:
+        if not args.openai_key:
+            raise SystemExit(
+                "OPENAI_API_KEY or --openai-key is required for --repair-broken."
+            )
+        print(repair_broken_indexes(args))
+        return
 
     if args.stats_only:
         collections = list_file_collections(
