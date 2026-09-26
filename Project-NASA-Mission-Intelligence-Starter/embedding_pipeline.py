@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and inspect per-file ChromaDB indexes for the NASA mission corpus."""
+"""Build and inspect a ChromaDB index for the NASA mission text corpus."""
 
 import argparse
 import hashlib
@@ -22,21 +22,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _slug(value: str, max_length: int = 80) -> str:
-    value = value.lower().strip()
-    value = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
-    return (value or "unknown")[:max_length].strip("_") or "unknown"
-
-
-def file_collection_name(base_name: str, file_path: Path, mission: str) -> str:
-    """Return a stable Chroma collection name for one source file."""
-    path_hash = hashlib.sha1(str(file_path).encode("utf-8")).hexdigest()[:8]
-    source_slug = _slug(file_path.stem, max_length=70)
-    return f"{base_name}__file__{_slug(mission, 24)}__{source_slug}_{path_hash}"
-
-
 class ChromaEmbeddingPipelineTextOnly:
-    """Create OpenAI embeddings for text chunks in one Chroma collection."""
+    """Create OpenAI embeddings for NASA text chunks and persist them in ChromaDB."""
 
     def __init__(
         self,
@@ -44,7 +31,7 @@ class ChromaEmbeddingPipelineTextOnly:
         chroma_persist_directory: str = "./chroma_db_openai",
         collection_name: str = "nasa_space_missions_text",
         embedding_model: str = "text-embedding-3-small",
-        chunk_size: int = 400,
+        chunk_size: int = 500,
         chunk_overlap: int = 100,
     ):
         if chunk_size <= 0:
@@ -60,16 +47,9 @@ class ChromaEmbeddingPipelineTextOnly:
         self.chunk_overlap = chunk_overlap
         self.chroma_persist_directory = chroma_persist_directory
         self.collection_name = collection_name
-
-        base_url = (
-            "https://openai.vocareum.com/v1"
-            if openai_api_key and openai_api_key.startswith("voc")
-            else None
-        )
+        base_url = "https://openai.vocareum.com/v1" if openai_api_key and openai_api_key.startswith("voc") else None
         self.openai_client = (
-            OpenAI(api_key=openai_api_key, base_url=base_url)
-            if openai_api_key
-            else None
+            OpenAI(api_key=openai_api_key, base_url=base_url) if openai_api_key else None
         )
 
         Path(chroma_persist_directory).mkdir(parents=True, exist_ok=True)
@@ -77,7 +57,7 @@ class ChromaEmbeddingPipelineTextOnly:
         self.collection = self.chroma_client.get_or_create_collection(
             name=collection_name,
             metadata={
-                "description": "NASA source-file chunks",
+                "description": "NASA Apollo 11, Apollo 13, and Challenger text chunks",
                 "embedding_model": embedding_model,
             },
         )
@@ -108,9 +88,7 @@ class ChromaEmbeddingPipelineTextOnly:
                     "chunk_size": len(chunk),
                     "configured_chunk_size": self.chunk_size,
                     "configured_chunk_overlap": self.chunk_overlap,
-                    "content_sha256": hashlib.sha256(
-                        chunk.encode("utf-8")
-                    ).hexdigest(),
+                    "content_sha256": hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
                 }
             )
             chunks.append((chunk, chunk_metadata))
@@ -126,6 +104,13 @@ class ChromaEmbeddingPipelineTextOnly:
 
         return chunks
 
+    def check_document_exists(self, doc_id: str) -> bool:
+        result = self.collection.get(ids=[doc_id])
+        return bool(result.get("ids"))
+
+    def get_embedding(self, text: str) -> List[float]:
+        return self.get_embeddings([text])[0]
+
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         if not self.openai_client:
             raise ValueError("An OpenAI API key is required to create embeddings.")
@@ -138,7 +123,20 @@ class ChromaEmbeddingPipelineTextOnly:
         return [item.embedding for item in response.data]
 
     @staticmethod
-    def extract_mission_from_path(file_path: Path) -> str:
+    def _slug(value: str) -> str:
+        value = value.lower().strip()
+        value = re.sub(r"[^a-z0-9]+", "_", value)
+        return value.strip("_") or "unknown"
+
+    def generate_document_id(self, file_path: Path, metadata: Dict[str, Any]) -> str:
+        """Generate a stable ID using mission, source, path hash, and chunk index."""
+        mission = self._slug(str(metadata.get("mission", "unknown")))
+        source = self._slug(str(metadata.get("source", file_path.stem)))
+        path_hash = hashlib.sha1(str(file_path).encode("utf-8")).hexdigest()[:10]
+        chunk_index = int(metadata.get("chunk_index", 0))
+        return f"{mission}_{source}_{path_hash}_chunk_{chunk_index:04d}"
+
+    def extract_mission_from_path(self, file_path: Path) -> str:
         path_str = str(file_path).lower()
         if "apollo11" in path_str or "apollo_11" in path_str:
             return "apollo_11"
@@ -148,8 +146,7 @@ class ChromaEmbeddingPipelineTextOnly:
             return "challenger"
         return "unknown"
 
-    @staticmethod
-    def extract_data_type_from_path(file_path: Path) -> str:
+    def extract_data_type_from_path(self, file_path: Path) -> str:
         name = str(file_path).lower()
         if "audio" in name:
             return "audio_transcript"
@@ -161,8 +158,7 @@ class ChromaEmbeddingPipelineTextOnly:
             return "textract_extracted"
         return "document"
 
-    @staticmethod
-    def extract_document_category_from_filename(filename: str) -> str:
+    def extract_document_category_from_filename(self, filename: str) -> str:
         value = filename.lower()
         if "pao" in value:
             return "public_affairs_officer"
@@ -178,9 +174,7 @@ class ChromaEmbeddingPipelineTextOnly:
             return "command_module"
         return "general_document"
 
-    def process_text_file(
-        self, file_path: Path
-    ) -> List[Tuple[str, Dict[str, Any]]]:
+    def process_text_file(self, file_path: Path) -> List[Tuple[str, Dict[str, Any]]]:
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -197,14 +191,44 @@ class ChromaEmbeddingPipelineTextOnly:
             "content_type": "full_text",
             "mission": self.extract_mission_from_path(file_path),
             "data_type": self.extract_data_type_from_path(file_path),
-            "document_category": self.extract_document_category_from_filename(
-                file_path.name
-            ),
+            "document_category": self.extract_document_category_from_filename(file_path.name),
             "file_size": len(content),
             "processed_timestamp": datetime.now(timezone.utc).isoformat(),
-            "collection_name": self.collection_name,
         }
         return self.chunk_text(content, metadata)
+
+    def scan_text_files_only(self, base_path: str) -> List[Path]:
+        base = Path(base_path)
+        if (base / "data_text").is_dir():
+            base = base / "data_text"
+
+        files: List[Path] = []
+        if base.name.lower() in {"apollo11", "apollo13", "challenger"} and base.is_dir():
+            files.extend(base.rglob("*.txt"))
+        else:
+            for mission_dir in ("apollo11", "apollo13", "challenger"):
+                directory = base / mission_dir
+                if directory.is_dir():
+                    files.extend(directory.rglob("*.txt"))
+
+        return sorted(
+            p for p in files
+            if not p.name.startswith(".") and "summary" not in p.name.lower()
+        )
+
+    def get_file_documents(self, file_path: Path) -> List[str]:
+        result = self.collection.get(where={"file_path": str(file_path)})
+        return list(result.get("ids") or [])
+
+    def delete_documents_by_source(self, source_pattern: str) -> int:
+        all_docs = self.collection.get()
+        ids_to_delete = []
+        for doc_id, metadata in zip(all_docs.get("ids", []), all_docs.get("metadatas", [])):
+            if source_pattern.lower() in str((metadata or {}).get("source", "")).lower():
+                ids_to_delete.append(doc_id)
+        if ids_to_delete:
+            self.collection.delete(ids=ids_to_delete)
+        return len(ids_to_delete)
 
     def add_documents_to_collection(
         self,
@@ -222,15 +246,15 @@ class ChromaEmbeddingPipelineTextOnly:
         if not documents:
             return stats
 
-        existing = self.collection.get()
-        existing_ids = set(existing.get("ids") or [])
-
+        existing_ids = set(self.get_file_documents(file_path))
         if update_mode == "replace" and existing_ids:
             self.collection.delete(ids=list(existing_ids))
             existing_ids.clear()
 
-        def document_id(metadata: Dict[str, Any]) -> str:
-            return f"chunk_{int(metadata.get('chunk_index', 0)):06d}"
+        generated_ids = {
+            self.generate_document_id(file_path, metadata)
+            for _, metadata in documents
+        }
 
         for offset in range(0, len(documents), batch_size):
             batch = documents[offset : offset + batch_size]
@@ -238,11 +262,13 @@ class ChromaEmbeddingPipelineTextOnly:
             update_rows = []
 
             for text, metadata in batch:
-                doc_id = document_id(metadata)
-                if doc_id in existing_ids and update_mode == "skip":
+                doc_id = self.generate_document_id(file_path, metadata)
+                exists = doc_id in existing_ids or self.check_document_exists(doc_id)
+
+                if exists and update_mode == "skip":
                     stats["skipped"] += 1
                     continue
-                if doc_id in existing_ids and update_mode == "update":
+                if exists and update_mode == "update":
                     update_rows.append((doc_id, text, metadata))
                 else:
                     add_rows.append((doc_id, text, metadata))
@@ -250,7 +276,6 @@ class ChromaEmbeddingPipelineTextOnly:
             for rows, operation in ((add_rows, "add"), (update_rows, "update")):
                 if not rows:
                     continue
-
                 texts = [row[1] for row in rows]
                 embeddings = self.get_embeddings(texts)
                 ids = [row[0] for row in rows]
@@ -274,283 +299,104 @@ class ChromaEmbeddingPipelineTextOnly:
                     stats["updated"] += len(rows)
 
         if update_mode == "update":
-            generated_ids = {
-                document_id(metadata) for _, metadata in documents
-            }
             stale_ids = existing_ids - generated_ids
             if stale_ids:
                 self.collection.delete(ids=list(stale_ids))
 
         return stats
 
+    def process_all_text_data(
+        self,
+        base_path: str,
+        update_mode: str = "skip",
+        batch_size: int = 50,
+    ) -> Dict[str, Any]:
+        stats: Dict[str, Any] = {
+            "files_processed": 0,
+            "documents_added": 0,
+            "documents_updated": 0,
+            "documents_skipped": 0,
+            "errors": 0,
+            "total_chunks": 0,
+            "missions": {},
+        }
 
-def scan_text_files(base_path: str) -> List[Path]:
-    base = Path(base_path)
-    if (base / "data_text").is_dir():
-        base = base / "data_text"
+        files = self.scan_text_files_only(base_path)
+        logger.info("Found %s NASA text files.", len(files))
 
-    files: List[Path] = []
-    if base.name.lower() in {"apollo11", "apollo13", "challenger"} and base.is_dir():
-        files.extend(base.rglob("*.txt"))
-    else:
-        for mission_dir in ("apollo11", "apollo13", "challenger"):
-            directory = base / mission_dir
-            if directory.is_dir():
-                files.extend(directory.rglob("*.txt"))
+        for file_path in files:
+            mission = self.extract_mission_from_path(file_path)
+            mission_stats = stats["missions"].setdefault(
+                mission,
+                {"files": 0, "chunks": 0, "added": 0, "updated": 0, "skipped": 0},
+            )
+            try:
+                chunks = self.process_text_file(file_path)
+                result = self.add_documents_to_collection(
+                    chunks,
+                    file_path=file_path,
+                    batch_size=batch_size,
+                    update_mode=update_mode,
+                )
+                stats["files_processed"] += 1
+                stats["total_chunks"] += len(chunks)
+                stats["documents_added"] += result["added"]
+                stats["documents_updated"] += result["updated"]
+                stats["documents_skipped"] += result["skipped"]
 
-    return sorted(
-        p
-        for p in files
-        if not p.name.startswith(".") and "summary" not in p.name.lower()
-    )
+                mission_stats["files"] += 1
+                mission_stats["chunks"] += len(chunks)
+                mission_stats["added"] += result["added"]
+                mission_stats["updated"] += result["updated"]
+                mission_stats["skipped"] += result["skipped"]
+            except Exception as exc:
+                stats["errors"] += 1
+                logger.exception("Failed processing %s: %s", file_path, exc)
 
+        return stats
 
-def list_file_collections(
-    chroma_dir: str, base_collection_name: str
-) -> List[Dict[str, Any]]:
-    client = chromadb.PersistentClient(path=chroma_dir)
-    prefix = f"{base_collection_name}__file__"
-    rows = []
+    def get_collection_info(self) -> Dict[str, Any]:
+        return {
+            "collection_name": self.collection.name,
+            "document_count": self.collection.count(),
+            "persist_directory": self.chroma_persist_directory,
+            "embedding_model": self.embedding_model,
+        }
 
-    for info in client.list_collections():
-        name = getattr(info, "name", str(info))
-        if not name.startswith(prefix):
-            continue
-        collection = client.get_collection(name=name)
-        first = collection.get(limit=1, include=["metadatas"])
-        metadata = ((first.get("metadatas") or [{}])[:1] or [{}])[0] or {}
-        rows.append(
-            {
-                "collection_name": name,
-                "chunks": collection.count(),
-                "mission": metadata.get("mission", "unknown"),
-                "source": metadata.get("source", "unknown"),
-                "file_path": metadata.get("file_path", ""),
-                "chunk_size": metadata.get("configured_chunk_size"),
-                "chunk_overlap": metadata.get("configured_chunk_overlap"),
-            }
-        )
-
-    rows.sort(key=lambda row: (row["mission"], row["source"]))
-    return rows
-
-
-def verify_file_collection(
-    client,
-    collection_name: str,
-) -> Dict[str, Any]:
-    """Verify that a collection's persisted vector index can answer a query."""
-    try:
-        collection = client.get_collection(name=collection_name)
-        sample = collection.get(limit=1, include=["embeddings"])
-        ids = list(sample.get("ids") or [])
-        embeddings = sample.get("embeddings")
-        if not ids or embeddings is None or len(embeddings) == 0:
-            return {
-                "collection_name": collection_name,
-                "ok": False,
-                "error": "Collection has no retrievable sample embedding.",
-            }
-
-        embedding = embeddings[0]
-        collection.query(
-            query_embeddings=[embedding],
-            n_results=1,
+    def query_collection(self, query_text: str, n_results: int = 5) -> Dict[str, Any]:
+        if not query_text.strip():
+            raise ValueError("query_text must not be empty.")
+        if self.collection.count() == 0:
+            return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+        query_embedding = self.get_embedding(query_text)
+        return self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=min(n_results, self.collection.count()),
             include=["documents", "metadatas", "distances"],
         )
-        return {"collection_name": collection_name, "ok": True}
-    except Exception as exc:
+
+    def get_collection_stats(self) -> Dict[str, Any]:
+        all_docs = self.collection.get()
+        metadatas = all_docs.get("metadatas") or []
+        file_paths = {
+            (metadata or {}).get("file_path")
+            for metadata in metadatas
+            if (metadata or {}).get("file_path")
+        }
         return {
-            "collection_name": collection_name,
-            "ok": False,
-            "error": str(exc),
+            "collection_name": self.collection.name,
+            "total_chunks": self.collection.count(),
+            "unique_documents": len(file_paths),
+            "missions": dict(Counter((m or {}).get("mission", "unknown") for m in metadatas)),
+            "data_types": dict(Counter((m or {}).get("data_type", "unknown") for m in metadatas)),
+            "document_categories": dict(
+                Counter((m or {}).get("document_category", "unknown") for m in metadatas)
+            ),
         }
 
 
-def verify_per_file_indexes(
-    chroma_dir: str,
-    base_collection_name: str,
-) -> Dict[str, Any]:
-    """Check every per-file collection, including its on-disk HNSW segment."""
-    client = chromadb.PersistentClient(path=chroma_dir)
-    collections = list_file_collections(chroma_dir, base_collection_name)
-    checks = [
-        verify_file_collection(client, row["collection_name"])
-        for row in collections
-    ]
-    broken = [row for row in checks if not row["ok"]]
-    return {
-        "file_collection_count": len(checks),
-        "healthy": len(checks) - len(broken),
-        "broken": len(broken),
-        "checks": checks,
-    }
-
-
-def repair_broken_indexes(args: argparse.Namespace) -> Dict[str, Any]:
-    """Rebuild only per-file collections whose persisted vector index is broken."""
-    client = chromadb.PersistentClient(path=args.chroma_dir)
-    rows = list_file_collections(args.chroma_dir, args.collection_name)
-    row_by_name = {row["collection_name"]: row for row in rows}
-
-    verification = verify_per_file_indexes(
-        args.chroma_dir,
-        args.collection_name,
-    )
-    broken_checks = [
-        check for check in verification["checks"] if not check["ok"]
-    ]
-
-    repaired = []
-    failed = []
-
-    for check in broken_checks:
-        name = check["collection_name"]
-        row = row_by_name.get(name)
-        if not row:
-            failed.append(
-                {
-                    "collection_name": name,
-                    "error": "Collection metadata could not be read for repair.",
-                }
-            )
-            continue
-
-        file_path = Path(row["file_path"])
-        if not file_path.exists():
-            failed.append(
-                {
-                    "collection_name": name,
-                    "error": f"Source file not found: {file_path}",
-                }
-            )
-            continue
-
-        try:
-            client.delete_collection(name=name)
-            pipeline = ChromaEmbeddingPipelineTextOnly(
-                openai_api_key=args.openai_key,
-                chroma_persist_directory=args.chroma_dir,
-                collection_name=name,
-                embedding_model=args.embedding_model,
-                chunk_size=int(row.get("chunk_size") or args.chunk_size),
-                chunk_overlap=int(
-                    row.get("chunk_overlap") or args.chunk_overlap
-                ),
-            )
-            chunks = pipeline.process_text_file(file_path)
-            result = pipeline.add_documents_to_collection(
-                chunks,
-                file_path=file_path,
-                batch_size=args.batch_size,
-                update_mode="replace",
-            )
-            post_check = verify_file_collection(client, name)
-            if post_check["ok"]:
-                repaired.append(
-                    {
-                        "collection_name": name,
-                        "source": row.get("source"),
-                        "chunks": len(chunks),
-                        "added": result["added"],
-                    }
-                )
-            else:
-                failed.append(post_check)
-        except Exception as exc:
-            failed.append(
-                {
-                    "collection_name": name,
-                    "error": str(exc),
-                }
-            )
-
-    return {
-        "broken_found": len(broken_checks),
-        "repaired": repaired,
-        "failed": failed,
-    }
-
-
-def build_per_file_indexes(args: argparse.Namespace) -> Dict[str, Any]:
-    files = scan_text_files(args.data_path)
-    if not files:
-        raise FileNotFoundError(f"No NASA text files found under {args.data_path}")
-
-    totals = {
-        "files_processed": 0,
-        "documents_added": 0,
-        "documents_updated": 0,
-        "documents_skipped": 0,
-        "errors": 0,
-        "total_chunks": 0,
-        "missions": {},
-        "collections": [],
-    }
-
-    for file_path in files:
-        mission = ChromaEmbeddingPipelineTextOnly.extract_mission_from_path(file_path)
-        collection_name = file_collection_name(
-            args.collection_name, file_path, mission
-        )
-        pipeline = ChromaEmbeddingPipelineTextOnly(
-            openai_api_key=args.openai_key,
-            chroma_persist_directory=args.chroma_dir,
-            collection_name=collection_name,
-            embedding_model=args.embedding_model,
-            chunk_size=args.chunk_size,
-            chunk_overlap=args.chunk_overlap,
-        )
-
-        try:
-            chunks = pipeline.process_text_file(file_path)
-            result = pipeline.add_documents_to_collection(
-                chunks,
-                file_path=file_path,
-                batch_size=args.batch_size,
-                update_mode=args.update_mode,
-            )
-            totals["files_processed"] += 1
-            totals["total_chunks"] += len(chunks)
-            totals["documents_added"] += result["added"]
-            totals["documents_updated"] += result["updated"]
-            totals["documents_skipped"] += result["skipped"]
-
-            mission_stats = totals["missions"].setdefault(
-                mission,
-                {"files": 0, "chunks": 0},
-            )
-            mission_stats["files"] += 1
-            mission_stats["chunks"] += len(chunks)
-
-            totals["collections"].append(
-                {
-                    "collection_name": collection_name,
-                    "mission": mission,
-                    "source": file_path.stem,
-                    "chunks": len(chunks),
-                    "added": result["added"],
-                    "updated": result["updated"],
-                    "skipped": result["skipped"],
-                }
-            )
-            logger.info(
-                "Indexed %s -> %s (%s chunks)",
-                file_path.name,
-                collection_name,
-                len(chunks),
-            )
-        except Exception as exc:
-            totals["errors"] += 1
-            logger.exception("Failed processing %s: %s", file_path, exc)
-
-    return totals
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="NASA per-file ChromaDB embedding pipeline"
-    )
+    parser = argparse.ArgumentParser(description="NASA ChromaDB embedding pipeline")
     parser.add_argument("--data-path", default="./data_text")
     parser.add_argument("--openai-key", default=os.getenv("OPENAI_API_KEY"))
     parser.add_argument("--chroma-dir", default="./chroma_db_openai")
@@ -558,66 +404,119 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
     parser.add_argument("--chunk-size", type=int, default=400)
     parser.add_argument("--chunk-overlap", type=int, default=100)
+    parser.add_argument("--parent-chunk-size", type=int, default=1200)
+    parser.add_argument("--parent-chunk-overlap", type=int, default=300)
+    parser.add_argument("--parent-collection-name")
+    parser.add_argument("--challenger-collection-name")
     parser.add_argument("--batch-size", type=int, default=50)
-    parser.add_argument(
-        "--update-mode",
-        choices=["skip", "update", "replace"],
-        default="skip",
-    )
+    parser.add_argument("--update-mode", choices=["skip", "update", "replace"], default="skip")
     parser.add_argument("--stats-only", action="store_true")
-    parser.add_argument("--verify-only", action="store_true")
-    parser.add_argument("--repair-broken", action="store_true")
+    parser.add_argument("--test-query")
+    parser.add_argument("--delete-source")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
 
-    if args.verify_only:
-        print(
-            verify_per_file_indexes(
-                args.chroma_dir,
-                args.collection_name,
-            )
-        )
-        return
+    if not args.stats_only and not args.openai_key:
+        raise SystemExit("OPENAI_API_KEY or --openai-key is required unless --stats-only is used.")
 
-    if args.repair_broken:
-        if not args.openai_key:
-            raise SystemExit(
-                "OPENAI_API_KEY or --openai-key is required for --repair-broken."
-            )
-        print(repair_broken_indexes(args))
-        return
+    parent_collection_name = args.parent_collection_name or f"{args.collection_name}_parent"
+    challenger_collection_name = (
+        args.challenger_collection_name or f"{args.collection_name}_challenger"
+    )
 
-    if args.stats_only:
-        collections = list_file_collections(
-            args.chroma_dir, args.collection_name
-        )
-        mission_counts = Counter(row["mission"] for row in collections)
+    child_pipeline = ChromaEmbeddingPipelineTextOnly(
+        openai_api_key=args.openai_key,
+        chroma_persist_directory=args.chroma_dir,
+        collection_name=args.collection_name,
+        embedding_model=args.embedding_model,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+    )
+    parent_pipeline = ChromaEmbeddingPipelineTextOnly(
+        openai_api_key=args.openai_key,
+        chroma_persist_directory=args.chroma_dir,
+        collection_name=parent_collection_name,
+        embedding_model=args.embedding_model,
+        chunk_size=args.parent_chunk_size,
+        chunk_overlap=args.parent_chunk_overlap,
+    )
+    challenger_pipeline = ChromaEmbeddingPipelineTextOnly(
+        openai_api_key=args.openai_key,
+        chroma_persist_directory=args.chroma_dir,
+        collection_name=challenger_collection_name,
+        embedding_model=args.embedding_model,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+    )
+
+    if args.delete_source:
         print(
             {
-                "architecture": "per_file_collections",
-                "file_collection_count": len(collections),
-                "total_chunks": sum(row["chunks"] for row in collections),
-                "missions": dict(mission_counts),
-                "collections": collections,
+                "child_deleted_chunks": child_pipeline.delete_documents_by_source(args.delete_source),
+                "parent_deleted_chunks": parent_pipeline.delete_documents_by_source(args.delete_source),
+                "challenger_deleted_chunks": challenger_pipeline.delete_documents_by_source(
+                    args.delete_source
+                ),
             }
         )
         return
 
-    if not args.openai_key:
-        raise SystemExit("OPENAI_API_KEY or --openai-key is required.")
+    if args.stats_only:
+        print(
+            {
+                "child": child_pipeline.get_collection_stats(),
+                "parent": parent_pipeline.get_collection_stats(),
+                "challenger": challenger_pipeline.get_collection_stats(),
+            }
+        )
+        return
 
     start = time.time()
-    stats = build_per_file_indexes(args)
-    stats["architecture"] = "per_file_collections"
-    stats["chunking"] = {
-        "chunk_size": args.chunk_size,
-        "chunk_overlap": args.chunk_overlap,
+    child_stats = child_pipeline.process_all_text_data(
+        args.data_path,
+        update_mode=args.update_mode,
+        batch_size=args.batch_size,
+    )
+    parent_stats = parent_pipeline.process_all_text_data(
+        args.data_path,
+        update_mode=args.update_mode,
+        batch_size=args.batch_size,
+    )
+    challenger_path = Path(args.data_path)
+    if challenger_path.name.lower() != "challenger":
+        challenger_path = challenger_path / "challenger"
+    challenger_stats = challenger_pipeline.process_all_text_data(
+        str(challenger_path),
+        update_mode=args.update_mode,
+        batch_size=args.batch_size,
+    )
+    stats = {
+        "child": child_stats,
+        "parent": parent_stats,
+        "challenger": challenger_stats,
+        "child_chunking": {
+            "chunk_size": args.chunk_size,
+            "chunk_overlap": args.chunk_overlap,
+        },
+        "parent_chunking": {
+            "chunk_size": args.parent_chunk_size,
+            "chunk_overlap": args.parent_chunk_overlap,
+        },
+        "elapsed_seconds": round(time.time() - start, 2),
     }
-    stats["elapsed_seconds"] = round(time.time() - start, 2)
     print(stats)
+
+    if args.test_query:
+        print(
+            {
+                "child": child_pipeline.query_collection(args.test_query, n_results=5),
+                "parent": parent_pipeline.query_collection(args.test_query, n_results=5),
+                "challenger": challenger_pipeline.query_collection(args.test_query, n_results=5),
+            }
+        )
 
 
 if __name__ == "__main__":
