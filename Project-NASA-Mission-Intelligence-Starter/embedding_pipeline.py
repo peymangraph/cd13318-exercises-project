@@ -399,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chroma-dir", default="./chroma_db_openai")
     parser.add_argument("--collection-name", default="nasa_space_missions_text")
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
-    parser.add_argument("--chunk-size", type=int, default=500)
+    parser.add_argument("--chunk-size", type=int, default=400)
     parser.add_argument("--chunk-overlap", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--update-mode", choices=["skip", "update", "replace"], default="skip")
