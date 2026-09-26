@@ -26,27 +26,17 @@ def discover_chroma_backends() -> Dict[str, Dict[str, Any]]:
         try:
             client = chromadb.PersistentClient(path=str(directory))
             collections = client.list_collections()
-            collection_names = {
-                getattr(collection_info, "name", str(collection_info))
-                for collection_info in collections
-            }
             for collection_info in collections:
                 name = getattr(collection_info, "name", str(collection_info))
-                if name.endswith("_parent"):
+                if name.endswith("_parent") or name.endswith("_challenger"):
                     continue
                 collection = client.get_collection(name=name)
-                parent_name = f"{name}_parent"
-                has_parent = parent_name in collection_names
-                layer_label = "2-layer" if has_parent else "single-layer"
                 key = f"{directory.name}:{name}"
                 backends[key] = {
                     "directory": str(directory),
                     "collection_name": name,
-                    "display_name": (
-                        f"{name} ({directory.name}, {collection.count()} child chunks, {layer_label})"
-                    ),
+                    "display_name": f"{name} ({directory.name}, {collection.count()} chunks)",
                     "document_count": collection.count(),
-                    "has_parent_collection": has_parent,
                 }
         except Exception as exc:
             key = f"{directory.name}:error"
@@ -62,29 +52,25 @@ def discover_chroma_backends() -> Dict[str, Dict[str, Any]]:
 
 
 def initialize_rag_system(chroma_dir: str, collection_name: str):
-    """Connect to the child collection and its optional parent collection.
-
-    The child collection remains the final evidence source. When a sibling
-    "<collection_name>_parent" collection exists, retrieval uses it as a coarse
-    first-stage index to identify promising regions before ranking child chunks.
-    """
+    """Connect to the main single-layer index and optional Challenger index."""
     try:
         client = chromadb.PersistentClient(path=chroma_dir)
-        child_collection = client.get_collection(name=collection_name)
-        parent_collection = None
-        parent_name = f"{collection_name}_parent"
+        main_collection = client.get_collection(name=collection_name)
+        challenger_collection = None
+        challenger_name = f"{collection_name}_challenger"
         try:
-            parent_collection = client.get_collection(name=parent_name)
+            challenger_collection = client.get_collection(name=challenger_name)
         except Exception:
-            parent_collection = None
+            challenger_collection = None
 
-        backend = {
-            "child": child_collection,
-            "parent": parent_collection,
+        return {
+            "main": main_collection,
+            "challenger": challenger_collection,
             "collection_name": collection_name,
-            "parent_collection_name": parent_name if parent_collection is not None else None,
-        }
-        return backend, True, None
+            "challenger_collection_name": (
+                challenger_name if challenger_collection is not None else None
+            ),
+        }, True, None
     except Exception as exc:
         return None, False, str(exc)
 
@@ -352,16 +338,21 @@ def retrieve_documents(
     openai_key: Optional[str] = None,
     embedding_model: str = "text-embedding-3-small",
 ) -> Optional[Dict[str, Any]]:
-    """Retrieve with hierarchical parent-child search plus semantic/BM25 fusion."""
+    """Retrieve with two focused queries, semantic + BM25 fusion, and neighbors."""
     if collection is None:
         raise ValueError("A ChromaDB collection is required.")
 
-    if isinstance(collection, dict) and "child" in collection:
-        child_collection = collection["child"]
-        parent_collection = collection.get("parent")
-    else:
-        child_collection = collection
-        parent_collection = None
+    # Keep the original single-layer retriever. Challenger questions use a
+    # dedicated Challenger-only embedding collection when it is available.
+    if isinstance(collection, dict) and "main" in collection:
+        if (
+            (mission_filter or "").lower() == "challenger"
+            and collection.get("challenger") is not None
+        ):
+            collection = collection["challenger"]
+        else:
+            collection = collection["main"]
+
     if not query or not query.strip():
         raise ValueError("Query must not be empty.")
     if n_results < 1:
@@ -376,69 +367,25 @@ def retrieve_documents(
         where = {"mission": mission_filter}
 
     clean_query = query.strip()
-    generated_queries = _generate_retrieval_queries(
+    retrieval_queries = _generate_retrieval_queries(
         clean_query,
         mission_filter,
         api_key,
     )
-    # Keep the user's literal information need in retrieval in addition to
-    # reformulations so query rewriting cannot accidentally drop key concepts.
-    retrieval_queries = [clean_query]
-    for generated_query in generated_queries:
-        if generated_query.lower() not in {item.lower() for item in retrieval_queries}:
-            retrieval_queries.append(generated_query)
 
     try:
-        collection_size = child_collection.count()
+        collection_size = collection.count()
     except Exception:
         collection_size = n_results
 
     if collection_size == 0:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-    # Stage 1: coarse parent retrieval. Parent chunks are not sent to the LLM;
-    # they identify promising source regions that can boost precise child chunks.
-    parent_regions: List[Dict[str, Any]] = []
-    if parent_collection is not None:
-        try:
-            parent_count = parent_collection.count()
-            if parent_count > 0:
-                parent_embedding = _embed_query(clean_query, api_key, embedding_model)
-                parent_kwargs = {
-                    "query_embeddings": [parent_embedding],
-                    "n_results": min(parent_count, max(n_results, 8)),
-                    "include": ["documents", "metadatas", "distances"],
-                }
-                if where is not None:
-                    parent_kwargs["where"] = where
-                parent_raw = parent_collection.query(**parent_kwargs)
-                parent_metadatas = (parent_raw.get("metadatas") or [[]])[0]
-                for parent_rank, metadata in enumerate(parent_metadatas, start=1):
-                    metadata = metadata or {}
-                    file_path = metadata.get("file_path")
-                    chunk_start = metadata.get("chunk_start")
-                    chunk_end = metadata.get("chunk_end")
-                    if (
-                        file_path
-                        and isinstance(chunk_start, int)
-                        and isinstance(chunk_end, int)
-                    ):
-                        parent_regions.append(
-                            {
-                                "rank": parent_rank,
-                                "file_path": str(file_path),
-                                "chunk_start": chunk_start,
-                                "chunk_end": chunk_end,
-                            }
-                        )
-        except Exception:
-            parent_regions = []
-
-    # Load the filtered child corpus once for BM25 scoring and neighbor lookup.
+    # Load the filtered corpus once for BM25 scoring and neighbor lookup.
     corpus_kwargs = {"include": ["documents", "metadatas"]}
     if where is not None:
         corpus_kwargs["where"] = where
-    corpus = child_collection.get(**corpus_kwargs)
+    corpus = collection.get(**corpus_kwargs)
 
     corpus_ids = list(corpus.get("ids") or [])
     corpus_documents = list(corpus.get("documents") or [])
@@ -464,7 +411,6 @@ def retrieve_documents(
             "semantic_ranks": {},
             "lexical_ranks": {},
             "bm25_scores": {},
-            "parent_ranks": {},
             "neighbor_of": None,
         }
         corpus_by_id[doc_id] = row
@@ -490,7 +436,7 @@ def retrieve_documents(
         if where is not None:
             semantic_kwargs["where"] = where
 
-        semantic_raw = child_collection.query(**semantic_kwargs)
+        semantic_raw = collection.query(**semantic_kwargs)
         semantic_ids = (semantic_raw.get("ids") or [[]])[0]
         semantic_documents = (semantic_raw.get("documents") or [[]])[0]
         semantic_metadatas = (semantic_raw.get("metadatas") or [[]])[0]
@@ -531,7 +477,6 @@ def retrieve_documents(
                 candidate["semantic_ranks"] = dict(candidate.get("semantic_ranks") or {})
                 candidate["lexical_ranks"] = dict(candidate.get("lexical_ranks") or {})
                 candidate["bm25_scores"] = dict(candidate.get("bm25_scores") or {})
-                candidate["parent_ranks"] = dict(candidate.get("parent_ranks") or {})
 
             candidate["document"] = document
             candidate["metadata"] = metadata
@@ -567,46 +512,9 @@ def retrieve_documents(
                 candidate["semantic_ranks"] = {}
                 candidate["lexical_ranks"] = {}
                 candidate["bm25_scores"] = {}
-                candidate["parent_ranks"] = {}
 
             candidate["lexical_ranks"][query_index] = lexical_rank
             candidate["bm25_scores"][query_index] = bm25_score
-            candidates[doc_id] = candidate
-
-    # Stage 2: add child chunks that overlap the best parent regions. This keeps
-    # final evidence precise while allowing larger parent chunks to preserve context.
-    if parent_regions:
-        for doc_id, row in corpus_by_id.items():
-            metadata = row.get("metadata") or {}
-            file_path = metadata.get("file_path")
-            chunk_start = metadata.get("chunk_start")
-            chunk_end = metadata.get("chunk_end")
-            if (
-                not file_path
-                or not isinstance(chunk_start, int)
-                or not isinstance(chunk_end, int)
-            ):
-                continue
-
-            overlapping_ranks = [
-                region["rank"]
-                for region in parent_regions
-                if region["file_path"] == str(file_path)
-                and chunk_end >= region["chunk_start"]
-                and chunk_start <= region["chunk_end"]
-            ]
-            if not overlapping_ranks:
-                continue
-
-            candidate = candidates.get(doc_id)
-            if candidate is None:
-                candidate = dict(row)
-                candidate["semantic_ranks"] = {}
-                candidate["lexical_ranks"] = {}
-                candidate["bm25_scores"] = {}
-                candidate["parent_ranks"] = {}
-                candidate["neighbor_of"] = None
-            candidate.setdefault("parent_ranks", {})["coarse"] = min(overlapping_ranks)
             candidates[doc_id] = candidate
 
     # For Challenger timeline/accident questions, ensure the already-indexed
@@ -650,7 +558,6 @@ def retrieve_documents(
                     injected["semantic_ranks"] = {}
                     injected["lexical_ranks"] = {}
                     injected["bm25_scores"] = {}
-                    injected["parent_ranks"] = {}
                     injected["neighbor_of"] = None
                     candidates[doc_id] = injected
 
@@ -678,7 +585,6 @@ def retrieve_documents(
             expanded["semantic_ranks"] = dict(seed.get("semantic_ranks") or {})
             expanded["lexical_ranks"] = dict(seed.get("lexical_ranks") or {})
             expanded["bm25_scores"] = dict(seed.get("bm25_scores") or {})
-            expanded["parent_ranks"] = dict(seed.get("parent_ranks") or {})
             expanded["neighbor_of"] = seed_id
             candidates[neighbor_id] = expanded
 
@@ -698,17 +604,8 @@ def retrieve_documents(
             for rank in lexical_ranks.values()
             if isinstance(rank, int) and rank > 0
         )
-        parent_ranks = candidate.get("parent_ranks") or {}
-        # Parent retrieval should guide child ranking, not dominate it. Keep the
-        # coarse-context signal deliberately weaker than direct child semantic/BM25
-        # evidence so broad parent regions cannot displace precise child matches.
-        parent_score = 0.25 * sum(
-            1.0 / (60 + rank)
-            for rank in parent_ranks.values()
-            if isinstance(rank, int) and rank > 0
-        )
         coverage_bonus = 0.01 * len(set(semantic_ranks) | set(lexical_ranks))
-        fused_score = semantic_score + lexical_score + parent_score + coverage_bonus
+        fused_score = semantic_score + lexical_score + coverage_bonus
         priority_bonus = _challenger_priority_bonus(
             candidate["document"],
             candidate["metadata"],
@@ -720,9 +617,7 @@ def retrieve_documents(
         # added after the initial seed searches. Give it a modest floor only when it
         # matches a verified high-value transcript range.
         if priority_bonus > 0 and semantic_score == 0.0 and lexical_score == 0.0:
-            # Preserve verified Challenger accident/timeline evidence even when
-            # coarse parent retrieval points at broader mission material.
-            fused_score += 0.055
+            fused_score += 0.045
 
         if candidate.get("neighbor_of"):
             fused_score *= 0.92
