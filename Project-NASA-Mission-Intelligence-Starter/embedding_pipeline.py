@@ -401,6 +401,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
     parser.add_argument("--chunk-size", type=int, default=400)
     parser.add_argument("--chunk-overlap", type=int, default=100)
+    parser.add_argument("--parent-chunk-size", type=int, default=1200)
+    parser.add_argument("--parent-chunk-overlap", type=int, default=300)
+    parser.add_argument("--parent-collection-name")
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--update-mode", choices=["skip", "update", "replace"], default="skip")
     parser.add_argument("--stats-only", action="store_true")
@@ -415,7 +418,9 @@ def main() -> None:
     if not args.stats_only and not args.openai_key:
         raise SystemExit("OPENAI_API_KEY or --openai-key is required unless --stats-only is used.")
 
-    pipeline = ChromaEmbeddingPipelineTextOnly(
+    parent_collection_name = args.parent_collection_name or f"{args.collection_name}_parent"
+
+    child_pipeline = ChromaEmbeddingPipelineTextOnly(
         openai_api_key=args.openai_key,
         chroma_persist_directory=args.chroma_dir,
         collection_name=args.collection_name,
@@ -423,26 +428,66 @@ def main() -> None:
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
     )
+    parent_pipeline = ChromaEmbeddingPipelineTextOnly(
+        openai_api_key=args.openai_key,
+        chroma_persist_directory=args.chroma_dir,
+        collection_name=parent_collection_name,
+        embedding_model=args.embedding_model,
+        chunk_size=args.parent_chunk_size,
+        chunk_overlap=args.parent_chunk_overlap,
+    )
 
     if args.delete_source:
-        print({"deleted_chunks": pipeline.delete_documents_by_source(args.delete_source)})
+        print(
+            {
+                "child_deleted_chunks": child_pipeline.delete_documents_by_source(args.delete_source),
+                "parent_deleted_chunks": parent_pipeline.delete_documents_by_source(args.delete_source),
+            }
+        )
         return
 
     if args.stats_only:
-        print(pipeline.get_collection_stats())
+        print(
+            {
+                "child": child_pipeline.get_collection_stats(),
+                "parent": parent_pipeline.get_collection_stats(),
+            }
+        )
         return
 
     start = time.time()
-    stats = pipeline.process_all_text_data(
+    child_stats = child_pipeline.process_all_text_data(
         args.data_path,
         update_mode=args.update_mode,
         batch_size=args.batch_size,
     )
-    stats["elapsed_seconds"] = round(time.time() - start, 2)
+    parent_stats = parent_pipeline.process_all_text_data(
+        args.data_path,
+        update_mode=args.update_mode,
+        batch_size=args.batch_size,
+    )
+    stats = {
+        "child": child_stats,
+        "parent": parent_stats,
+        "child_chunking": {
+            "chunk_size": args.chunk_size,
+            "chunk_overlap": args.chunk_overlap,
+        },
+        "parent_chunking": {
+            "chunk_size": args.parent_chunk_size,
+            "chunk_overlap": args.parent_chunk_overlap,
+        },
+        "elapsed_seconds": round(time.time() - start, 2),
+    }
     print(stats)
 
     if args.test_query:
-        print(pipeline.query_collection(args.test_query, n_results=5))
+        print(
+            {
+                "child": child_pipeline.query_collection(args.test_query, n_results=5),
+                "parent": parent_pipeline.query_collection(args.test_query, n_results=5),
+            }
+        )
 
 
 if __name__ == "__main__":
