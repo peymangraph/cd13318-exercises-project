@@ -6,8 +6,8 @@ This is the completed Udacity final-project implementation for a Retrieval-Augme
 
 ## Architecture
 
-1. `embedding_pipeline.py` reads NASA text files and builds a two-layer ChromaDB index: parent chunks preserve broader context, while child chunks provide precise evidence.
-2. `rag_client.py` performs hierarchical parent-child retrieval, then combines child-level semantic retrieval, BM25 lexical retrieval, mission filtering, deduplication, and neighbor expansion before constructing source-attributed context.
+1. `embedding_pipeline.py` reads NASA text files, builds the main single-layer ChromaDB index, and also builds a dedicated Challenger-only embedding collection.
+2. `rag_client.py` uses the original single-layer hybrid retriever (semantic retrieval + BM25 + neighbor expansion). Challenger questions automatically route to the dedicated Challenger collection when it is available.
 3. `llm_client.py` generates a grounded answer using a NASA-expert system prompt, current retrieved context, and bounded conversation history.
 4. `ragas_evaluator.py` computes **Response Relevancy** and **Faithfulness** using RAGAS.
 5. `chat.py` provides the Streamlit interface.
@@ -64,24 +64,20 @@ Run from this project directory:
       --collection-name nasa_space_missions_text \
       --chunk-size 400 \
       --chunk-overlap 100 \
-      --parent-chunk-size 1200 \
-      --parent-chunk-overlap 300 \
       --update-mode replace
 
 The runtime options satisfy the project rubric:
 
 - `--chunk-size`
 - `--chunk-overlap`
-- `--parent-chunk-size`
-- `--parent-chunk-overlap`
-- `--parent-collection-name`
+- `--challenger-collection-name`
 - `--chroma-dir`
 - `--collection-name`
 - `--embedding-model`
 - `--batch-size`
 - `--update-mode skip|update|replace`
 
-The pipeline creates `nasa_space_missions_text` as the child collection and `nasa_space_missions_text_parent` as the parent collection by default. Child chunks use 400 characters with 100-character overlap; parent chunks use 1200 characters with 300-character overlap, keeping a 25% overlap ratio in both layers. The pipeline stores per-chunk metadata including `source`, `file_path`, `mission`, chunk index, chunk boundaries, and content hash.
+The pipeline creates `nasa_space_missions_text` as the main collection and `nasa_space_missions_text_challenger` as a dedicated Challenger-only collection by default. Both use 400-character chunks with 100-character overlap (25%). The dedicated Challenger index reduces competition from Apollo documents and is selected automatically for Challenger-filtered questions. The pipeline stores per-chunk metadata including `source`, `file_path`, `mission`, chunk index, chunk boundaries, and content hash.
 
 ## 2. Inspect collection statistics
 
@@ -152,8 +148,7 @@ The runner:
 ### Retrieval & LLM Integration
 
 - User question is explicitly embedded with the OpenAI embedding model before Chroma similarity search.
-- Hierarchical retrieval is implemented: coarse parent chunks identify promising document regions, and precise child chunks overlapping those regions receive a ranking signal before final evidence selection.
-- The original user question participates in retrieval alongside two generated focused retrieval queries so reformulation cannot replace the literal information need.
+- A dedicated Challenger-only embedding collection is used automatically for Challenger-filtered retrieval, while Apollo questions continue to use the main single-layer collection.
 - Runtime top-k retrieval: implemented.
 - Mission metadata filtering: implemented.
 - Results are score-sorted and deduplicated.
