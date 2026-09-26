@@ -699,8 +699,11 @@ def retrieve_documents(
             if isinstance(rank, int) and rank > 0
         )
         parent_ranks = candidate.get("parent_ranks") or {}
-        parent_score = sum(
-            1.0 / (40 + rank)
+        # Parent retrieval should guide child ranking, not dominate it. Keep the
+        # coarse-context signal deliberately weaker than direct child semantic/BM25
+        # evidence so broad parent regions cannot displace precise child matches.
+        parent_score = 0.25 * sum(
+            1.0 / (60 + rank)
             for rank in parent_ranks.values()
             if isinstance(rank, int) and rank > 0
         )
@@ -717,7 +720,9 @@ def retrieve_documents(
         # added after the initial seed searches. Give it a modest floor only when it
         # matches a verified high-value transcript range.
         if priority_bonus > 0 and semantic_score == 0.0 and lexical_score == 0.0:
-            fused_score += 0.045
+            # Preserve verified Challenger accident/timeline evidence even when
+            # coarse parent retrieval points at broader mission material.
+            fused_score += 0.055
 
         if candidate.get("neighbor_of"):
             fused_score *= 0.92
