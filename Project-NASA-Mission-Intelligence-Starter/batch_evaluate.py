@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from statistics import mean
+from statistics import mean, pstdev
 from typing import Any, Dict, List
 
 import llm_client
@@ -46,6 +46,7 @@ def run_batch(
     openai_key: str,
     model: str,
     top_k: int,
+    repeat_evaluations: int = 1,
 ) -> Dict[str, Any]:
     collection, success, error = rag_client.initialize_rag_system(chroma_dir, collection_name)
     if not success:
@@ -71,12 +72,35 @@ def run_batch(
             conversation_history=[],
             model=model,
         )
-        metrics = ragas_evaluator.evaluate_response_quality(
-            case["question"],
-            answer,
-            documents,
-            openai_key=openai_key,
-        )
+        evaluation_runs = []
+        for run_number in range(1, repeat_evaluations + 1):
+            metrics = ragas_evaluator.evaluate_response_quality(
+                case["question"],
+                answer,
+                documents,
+                openai_key=openai_key,
+            )
+            evaluation_runs.append(
+                {
+                    "run": run_number,
+                    "metrics": metrics,
+                }
+            )
+
+        diagnostic_metrics: Dict[str, Any] = {}
+        for metric_name in ("response_relevancy", "faithfulness"):
+            scores = [
+                run["metrics"][metric_name]
+                for run in evaluation_runs
+                if isinstance(run.get("metrics"), dict)
+                and isinstance(run["metrics"].get(metric_name), (int, float))
+            ]
+            if scores:
+                diagnostic_metrics[metric_name] = {
+                    "scores": scores,
+                    "mean": mean(scores),
+                    "std_dev": pstdev(scores) if len(scores) > 1 else 0.0,
+                }
 
         result = {
             "index": index,
@@ -84,29 +108,47 @@ def run_batch(
             "mission": case["mission"],
             "question": case["question"],
             "answer": answer,
-            "metrics": metrics,
+            "evaluation_repeat_count": repeat_evaluations,
+            "evaluation_runs": evaluation_runs,
+            "diagnostic_metrics": diagnostic_metrics,
         }
         per_question.append(result)
         print(json.dumps(result, indent=2))
 
     aggregate: Dict[str, float] = {}
     for metric_name in ("response_relevancy", "faithfulness"):
-        values = [
-            item["metrics"][metric_name]
+        question_means = [
+            item["diagnostic_metrics"][metric_name]["mean"]
             for item in per_question
-            if isinstance(item.get("metrics"), dict)
-            and isinstance(item["metrics"].get(metric_name), (int, float))
+            if isinstance(item.get("diagnostic_metrics"), dict)
+            and isinstance(
+                item["diagnostic_metrics"].get(metric_name, {}).get("mean"),
+                (int, float),
+            )
         ]
-        if values:
-            aggregate[f"mean_{metric_name}"] = mean(values)
+        if question_means:
+            aggregate[f"mean_{metric_name}"] = mean(question_means)
+            aggregate[f"std_dev_question_means_{metric_name}"] = (
+                pstdev(question_means) if len(question_means) > 1 else 0.0
+            )
 
     summary = {
         "question_count": len(per_question),
+        "evaluation_repeat_count": repeat_evaluations,
         "aggregate_metrics": aggregate,
         "results": per_question,
     }
     print("\nBATCH SUMMARY")
-    print(json.dumps({"question_count": summary["question_count"], "aggregate_metrics": aggregate}, indent=2))
+    print(
+        json.dumps(
+            {
+                "question_count": summary["question_count"],
+                "evaluation_repeat_count": repeat_evaluations,
+                "aggregate_metrics": aggregate,
+            },
+            indent=2,
+        )
+    )
     return summary
 
 
@@ -118,6 +160,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--openai-key", default=os.getenv("OPENAI_API_KEY"))
     parser.add_argument("--model", default="gpt-4o-mini")
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument(
+        "--repeat-evaluations",
+        type=int,
+        default=1,
+        help=(
+            "Re-score each exact generated answer this many times with RAGAS. "
+            "Retrieval and answer generation still run only once per question."
+        ),
+    )
     return parser
 
 
@@ -127,6 +178,8 @@ def main() -> None:
         raise SystemExit("OPENAI_API_KEY or --openai-key is required.")
     if args.top_k < 1:
         raise SystemExit("--top-k must be at least 1.")
+    if args.repeat_evaluations < 1:
+        raise SystemExit("--repeat-evaluations must be at least 1.")
 
     cases = load_evaluation_dataset(args.dataset)
     run_batch(
@@ -136,6 +189,7 @@ def main() -> None:
         openai_key=args.openai_key,
         model=args.model,
         top_k=args.top_k,
+        repeat_evaluations=args.repeat_evaluations,
     )
 
 
