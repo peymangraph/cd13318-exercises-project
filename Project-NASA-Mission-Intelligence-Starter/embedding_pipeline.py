@@ -203,10 +203,13 @@ class ChromaEmbeddingPipelineTextOnly:
             base = base / "data_text"
 
         files: List[Path] = []
-        for mission_dir in ("apollo11", "apollo13", "challenger"):
-            directory = base / mission_dir
-            if directory.is_dir():
-                files.extend(directory.rglob("*.txt"))
+        if base.name.lower() in {"apollo11", "apollo13", "challenger"} and base.is_dir():
+            files.extend(base.rglob("*.txt"))
+        else:
+            for mission_dir in ("apollo11", "apollo13", "challenger"):
+                directory = base / mission_dir
+                if directory.is_dir():
+                    files.extend(directory.rglob("*.txt"))
 
         return sorted(
             p for p in files
@@ -398,12 +401,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--openai-key", default=os.getenv("OPENAI_API_KEY"))
     parser.add_argument("--chroma-dir", default="./chroma_db_openai")
     parser.add_argument("--collection-name", default="nasa_space_missions_text")
+    parser.add_argument("--challenger-collection-name")
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
     parser.add_argument("--chunk-size", type=int, default=400)
     parser.add_argument("--chunk-overlap", type=int, default=100)
-    parser.add_argument("--parent-chunk-size", type=int, default=1200)
-    parser.add_argument("--parent-chunk-overlap", type=int, default=300)
-    parser.add_argument("--parent-collection-name")
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--update-mode", choices=["skip", "update", "replace"], default="skip")
     parser.add_argument("--stats-only", action="store_true")
@@ -418,9 +419,11 @@ def main() -> None:
     if not args.stats_only and not args.openai_key:
         raise SystemExit("OPENAI_API_KEY or --openai-key is required unless --stats-only is used.")
 
-    parent_collection_name = args.parent_collection_name or f"{args.collection_name}_parent"
+    challenger_collection_name = (
+        args.challenger_collection_name or f"{args.collection_name}_challenger"
+    )
 
-    child_pipeline = ChromaEmbeddingPipelineTextOnly(
+    pipeline = ChromaEmbeddingPipelineTextOnly(
         openai_api_key=args.openai_key,
         chroma_persist_directory=args.chroma_dir,
         collection_name=args.collection_name,
@@ -428,20 +431,22 @@ def main() -> None:
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
     )
-    parent_pipeline = ChromaEmbeddingPipelineTextOnly(
+    challenger_pipeline = ChromaEmbeddingPipelineTextOnly(
         openai_api_key=args.openai_key,
         chroma_persist_directory=args.chroma_dir,
-        collection_name=parent_collection_name,
+        collection_name=challenger_collection_name,
         embedding_model=args.embedding_model,
-        chunk_size=args.parent_chunk_size,
-        chunk_overlap=args.parent_chunk_overlap,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
     )
 
     if args.delete_source:
         print(
             {
-                "child_deleted_chunks": child_pipeline.delete_documents_by_source(args.delete_source),
-                "parent_deleted_chunks": parent_pipeline.delete_documents_by_source(args.delete_source),
+                "main_deleted_chunks": pipeline.delete_documents_by_source(args.delete_source),
+                "challenger_deleted_chunks": challenger_pipeline.delete_documents_by_source(
+                    args.delete_source
+                ),
             }
         )
         return
@@ -449,33 +454,33 @@ def main() -> None:
     if args.stats_only:
         print(
             {
-                "child": child_pipeline.get_collection_stats(),
-                "parent": parent_pipeline.get_collection_stats(),
+                "main": pipeline.get_collection_stats(),
+                "challenger": challenger_pipeline.get_collection_stats(),
             }
         )
         return
 
     start = time.time()
-    child_stats = child_pipeline.process_all_text_data(
+    main_stats = pipeline.process_all_text_data(
         args.data_path,
         update_mode=args.update_mode,
         batch_size=args.batch_size,
     )
-    parent_stats = parent_pipeline.process_all_text_data(
-        args.data_path,
+    challenger_path = Path(args.data_path)
+    if challenger_path.name.lower() != "challenger":
+        challenger_path = challenger_path / "challenger"
+    challenger_stats = challenger_pipeline.process_all_text_data(
+        str(challenger_path),
         update_mode=args.update_mode,
         batch_size=args.batch_size,
     )
+
     stats = {
-        "child": child_stats,
-        "parent": parent_stats,
-        "child_chunking": {
+        "main": main_stats,
+        "challenger": challenger_stats,
+        "chunking": {
             "chunk_size": args.chunk_size,
             "chunk_overlap": args.chunk_overlap,
-        },
-        "parent_chunking": {
-            "chunk_size": args.parent_chunk_size,
-            "chunk_overlap": args.parent_chunk_overlap,
         },
         "elapsed_seconds": round(time.time() - start, 2),
     }
@@ -484,8 +489,10 @@ def main() -> None:
     if args.test_query:
         print(
             {
-                "child": child_pipeline.query_collection(args.test_query, n_results=5),
-                "parent": parent_pipeline.query_collection(args.test_query, n_results=5),
+                "main": pipeline.query_collection(args.test_query, n_results=5),
+                "challenger": challenger_pipeline.query_collection(
+                    args.test_query, n_results=5
+                ),
             }
         )
 
