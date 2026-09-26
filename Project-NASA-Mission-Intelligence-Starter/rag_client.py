@@ -367,11 +367,17 @@ def retrieve_documents(
         where = {"mission": mission_filter}
 
     clean_query = query.strip()
-    retrieval_queries = _generate_retrieval_queries(
+    generated_queries = _generate_retrieval_queries(
         clean_query,
         mission_filter,
         api_key,
     )
+    # Preserve the user's literal information need. Reformulated queries expand
+    # recall, but they must not replace the original wording.
+    retrieval_queries = [clean_query]
+    for generated_query in generated_queries:
+        if generated_query.lower() not in {item.lower() for item in retrieval_queries}:
+            retrieval_queries.append(generated_query)
 
     try:
         collection_size = collection.count()
