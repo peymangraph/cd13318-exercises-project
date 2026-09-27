@@ -107,57 +107,6 @@ def _embed_query(query: str, openai_key: str, embedding_model: str) -> List[floa
     return response.data[0].embedding
 
 
-def _cosine_similarity(vector_a: List[float], vector_b: List[float]) -> float:
-    """Return cosine similarity for two embedding vectors."""
-    if not vector_a or not vector_b or len(vector_a) != len(vector_b):
-        return 0.0
-
-    dot_product = sum(a * b for a, b in zip(vector_a, vector_b))
-    norm_a = math.sqrt(sum(a * a for a in vector_a))
-    norm_b = math.sqrt(sum(b * b for b in vector_b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot_product / (norm_a * norm_b)
-
-
-def _attach_candidate_cosine_similarities(
-    child_collection,
-    candidates: Dict[str, Dict[str, Any]],
-    query_embedding: List[float],
-    batch_size: int = 256,
-) -> None:
-    """Fetch stored candidate embeddings and attach exact cosine similarity."""
-    candidate_ids = list(candidates)
-    for offset in range(0, len(candidate_ids), batch_size):
-        batch_ids = candidate_ids[offset : offset + batch_size]
-        if not batch_ids:
-            continue
-        try:
-            raw = child_collection.get(
-                ids=batch_ids,
-                include=["embeddings"],
-            )
-        except Exception:
-            continue
-
-        returned_ids = list(raw.get("ids") or [])
-        embeddings = raw.get("embeddings")
-        if embeddings is None:
-            continue
-
-        for doc_id, embedding in zip(returned_ids, embeddings):
-            candidate = candidates.get(doc_id)
-            if candidate is None or embedding is None:
-                continue
-            try:
-                candidate["cosine_similarity"] = _cosine_similarity(
-                    query_embedding,
-                    list(embedding),
-                )
-            except Exception:
-                candidate["cosine_similarity"] = 0.0
-
-
 
 def _generate_retrieval_queries(
     query: str,
@@ -413,7 +362,6 @@ def retrieve_documents(
     mission_filter: Optional[str] = None,
     openai_key: Optional[str] = None,
     embedding_model: str = "text-embedding-3-small",
-    min_similarity: float = 0.35,
 ) -> Optional[Dict[str, Any]]:
     """Retrieve with hierarchical parent-child search plus semantic/BM25 fusion."""
     if collection is None:
@@ -436,8 +384,6 @@ def retrieve_documents(
         raise ValueError("Query must not be empty.")
     if n_results < 1:
         raise ValueError("n_results must be at least 1.")
-    if not -1.0 <= min_similarity <= 1.0:
-        raise ValueError("min_similarity must be between -1 and 1.")
 
     api_key = openai_key or os.getenv("OPENAI_API_KEY") or os.getenv("CHROMA_OPENAI_API_KEY")
     if not api_key:
@@ -460,14 +406,6 @@ def retrieve_documents(
         if generated_query.lower() not in {item.lower() for item in retrieval_queries}:
             retrieval_queries.append(generated_query)
 
-    # Use the literal user question as the semantic quality gate reference.
-    # The same embedding is reused for parent retrieval and final cosine filtering.
-    original_query_embedding = _embed_query(
-        clean_query,
-        api_key,
-        embedding_model,
-    )
-
     try:
         collection_size = child_collection.count()
     except Exception:
@@ -483,7 +421,7 @@ def retrieve_documents(
         try:
             parent_count = parent_collection.count()
             if parent_count > 0:
-                parent_embedding = original_query_embedding
+                parent_embedding = _embed_query(clean_query, api_key, embedding_model)
                 parent_kwargs = {
                     "query_embeddings": [parent_embedding],
                     "n_results": min(parent_count, max(n_results, 8)),
@@ -560,11 +498,7 @@ def retrieve_documents(
 
     # Run semantic and BM25 retrieval independently for each focused query.
     for query_index, focused_query in enumerate(retrieval_queries):
-        query_embedding = (
-            original_query_embedding
-            if focused_query == clean_query
-            else _embed_query(focused_query, api_key, embedding_model)
-        )
+        query_embedding = _embed_query(focused_query, api_key, embedding_model)
 
         semantic_kwargs = {
             "query_embeddings": [query_embedding],
@@ -766,27 +700,9 @@ def retrieve_documents(
             expanded["neighbor_of"] = seed_id
             candidates[neighbor_id] = expanded
 
-    # Re-score every merged candidate against the literal user question using
-    # exact cosine similarity. This is an evidence-quality gate: top-k ranking
-    # alone is not enough because a nearest neighbor can still be a weak match.
-    _attach_candidate_cosine_similarities(
-        child_collection,
-        candidates,
-        original_query_embedding,
-    )
-
     # Fuse evidence across both focused queries and both retrieval channels.
     ranked = []
-    filtered_by_similarity = 0
     for candidate in candidates.values():
-        cosine_similarity = candidate.get("cosine_similarity")
-        if not isinstance(cosine_similarity, (int, float)):
-            cosine_similarity = 0.0
-
-        if cosine_similarity < min_similarity:
-            filtered_by_similarity += 1
-            continue
-
         semantic_ranks = candidate.get("semantic_ranks") or {}
         lexical_ranks = candidate.get("lexical_ranks") or {}
 
@@ -807,15 +723,7 @@ def retrieve_documents(
             if isinstance(rank, int) and rank > 0
         )
         coverage_bonus = 0.01 * len(set(semantic_ranks) | set(lexical_ranks))
-        # Cosine similarity is a direct semantic-quality signal and is therefore
-        # part of the final score, not only a hard filter.
-        fused_score = (
-            semantic_score
-            + lexical_score
-            + parent_score
-            + coverage_bonus
-            + (0.08 * cosine_similarity)
-        )
+        fused_score = semantic_score + lexical_score + parent_score + coverage_bonus
         priority_bonus = _challenger_priority_bonus(
             candidate["document"],
             candidate["metadata"],
@@ -846,7 +754,6 @@ def retrieve_documents(
                 candidate["document"],
                 candidate["metadata"],
                 candidate["distance"],
-                cosine_similarity,
             )
         )
 
@@ -876,14 +783,6 @@ def retrieve_documents(
         "documents": [[item[5] for item in unique]],
         "metadatas": [[item[6] for item in unique]],
         "distances": [[item[7] for item in unique]],
-        "similarities": [[item[8] for item in unique]],
-        "quality_gate": {
-            "min_similarity": min_similarity,
-            "candidate_count_before_gate": len(candidates),
-            "filtered_by_similarity": filtered_by_similarity,
-            "candidate_count_after_gate": len(ranked),
-            "selected_count": len(unique),
-        },
     }
 
 
