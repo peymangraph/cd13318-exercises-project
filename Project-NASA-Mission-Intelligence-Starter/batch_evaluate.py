@@ -47,6 +47,7 @@ def run_batch(
     model: str,
     top_k: int,
     repeat_evaluations: int = 1,
+    min_similarity: float = 0.35,
 ) -> Dict[str, Any]:
     collection, success, error = rag_client.initialize_rag_system(chroma_dir, collection_name)
     if not success:
@@ -60,9 +61,12 @@ def run_batch(
             n_results=top_k,
             mission_filter=case.get("mission"),
             openai_key=openai_key,
+            min_similarity=min_similarity,
         )
         documents = (retrieval.get("documents") or [[]])[0]
         metadatas = (retrieval.get("metadatas") or [[]])[0]
+        similarities = (retrieval.get("similarities") or [[]])[0]
+        quality_gate = retrieval.get("quality_gate") or {}
         context = rag_client.format_context(documents, metadatas)
 
         answer = llm_client.generate_response(
@@ -108,6 +112,10 @@ def run_batch(
             "mission": case["mission"],
             "question": case["question"],
             "answer": answer,
+            "retrieval_quality": {
+                "similarities": similarities,
+                "quality_gate": quality_gate,
+            },
             "evaluation_repeat_count": repeat_evaluations,
             "evaluation_runs": evaluation_runs,
             "diagnostic_metrics": diagnostic_metrics,
@@ -169,6 +177,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Retrieval and answer generation still run only once per question."
         ),
     )
+    parser.add_argument(
+        "--min-similarity",
+        type=float,
+        default=0.35,
+        help=(
+            "Minimum cosine similarity between the literal user question and a "
+            "retrieved child chunk. Weak candidates below this threshold are discarded."
+        ),
+    )
     return parser
 
 
@@ -180,6 +197,8 @@ def main() -> None:
         raise SystemExit("--top-k must be at least 1.")
     if args.repeat_evaluations < 1:
         raise SystemExit("--repeat-evaluations must be at least 1.")
+    if not -1.0 <= args.min_similarity <= 1.0:
+        raise SystemExit("--min-similarity must be between -1 and 1.")
 
     cases = load_evaluation_dataset(args.dataset)
     run_batch(
@@ -190,6 +209,7 @@ def main() -> None:
         model=args.model,
         top_k=args.top_k,
         repeat_evaluations=args.repeat_evaluations,
+        min_similarity=args.min_similarity,
     )
 
 
