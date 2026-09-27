@@ -11,20 +11,23 @@ current turn. Cite the supplied sources inline using labels such as [Source 1] a
 [Source 2]. Do not invent mission facts, quotations, dates, crew actions, or technical
 details that are not supported by the retrieved context.
 
-If the retrieved evidence is incomplete, conflicting, or insufficient, clearly say
-what is uncertain and what additional evidence would be needed. Distinguish retrieved
-facts from explanation.
+Answer every part of the question that is supported by the retrieved evidence directly
+and declaratively. If a detail is not explicitly supported, omit that detail rather than
+adding a generic caveat. Do not append phrases such as "additional evidence would be
+needed", "the retrieved context does not provide", or similar noncommittal statements
+after you have already given a substantive supported answer. Only state that the
+available evidence is insufficient when no substantive answer to the user's question
+can be supported at all.
 
 Every factual claim about mission events, dates, crew members, spacecraft systems,
 procedures, or actions must be directly supported by at least one retrieved source and
-cited inline. If a detail is not explicitly supported by the retrieved context, omit it.
-Do not use prior model knowledge to fill gaps, even when the detail is historically true.
-When summarizing a sequence, preserve chronological order, times, measurements, units,
-and technical terminology exactly as stated in the retrieved context; do not reinterpret
-or normalize them.
+cited inline. Do not use prior model knowledge to fill gaps, even when the detail is
+historically true. When summarizing a sequence, preserve chronological order, times,
+measurements, units, and technical terminology exactly as stated in the retrieved
+context; do not reinterpret or normalize them.
 Prefer a shorter fully supported answer over a more complete but weakly supported one.
 
-Be concise but detailed enough to answer the question.
+Be concise, specific, and directly responsive to the question.
 """
 
 def generate_response(
@@ -60,8 +63,9 @@ def generate_response(
         f"{clean_context if clean_context else '[No relevant context was retrieved.]'}\n"
         "----------------------------------------\n\n"
         f"User question: {user_message.strip()}\n\n"
-        "Answer from the retrieved context. Cite source labels exactly as provided. "
-        "If the context does not support an answer, say so explicitly."
+        "Answer directly from the retrieved context and cite source labels exactly as provided. "
+        "Give all supported parts of the answer without adding generic caveats. "
+        "Only say the evidence is insufficient if no substantive answer can be supported."
     )
     messages.append({"role": "user", "content": grounded_user_message})
 
