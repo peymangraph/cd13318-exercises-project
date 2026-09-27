@@ -110,7 +110,8 @@ Each answer is instructed to rely on retrieved NASA evidence, cite source labels
       --dataset evaluation_dataset.txt \
       --chroma-dir ./chroma_db_openai \
       --collection-name nasa_space_missions_text \
-      --top-k 5
+      --top-k 5 \\
+      --min-similarity 0.35
 
 The runner:
 
@@ -152,6 +153,7 @@ The runner:
 - Runtime top-k retrieval: implemented.
 - Mission metadata filtering: implemented.
 - Results are score-sorted and deduplicated.
+- Final child-chunk evidence is re-scored against the literal user question with cosine similarity; candidates below the runtime quality threshold are discarded before context construction.
 - LLM context uses separators and source attributions.
 - System prompt identifies the assistant as a NASA mission expert and requires source citations.
 - Conversation history is retained as role/content turns with bounded history.
